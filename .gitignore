@@ -1,0 +1,63 @@
+# Public-repo policy: this repo (Project-VR) is public-facing. Only material a
+# stranger with a G2 needs is tracked — README, the journey write-up, patches,
+# scripts, infra, g2-studio, and tools code. Internal working material (research
+# docs, audits, charters, run results, captures, agent instructions) stays on
+# disk, out of the repo.
+
+# Internal docs — everything under docs/ except the public journey write-up.
+/docs/*
+!/docs/JOURNEY.md
+# Agent instruction files (machine-specific, internal).
+/CLAUDE.md
+/AGENTS.md
+# Run records / replay outputs / benchmarks (internal evidence).
+/results/
+# Internal findings note inside otherwise-public tools code.
+/tools/led_dataset/MATCHER_FAILURE_FINDINGS.md
+# Annotation datasets / batches / research notes (internal evidence, not tool code).
+/tools/led_dataset/dataset/
+/tools/led_dataset/batches/
+/tools/led_dataset/research/
+# Local safety bundles (never upload).
+/.backups-*/
+# Internal root-level notes.
+/AUDIT.md
+/RESEARCH-tearing.md
+/RESEARCH-tracking.md
+
+# Upstream source trees — separate repos with their own history, built in place.
+/src/
+# Regenerable NVIDIA module rollback backups.
+/module-backup-*/
+# Local-only / internal — never upload (kept on disk, out of the repo).
+/backups/
+/diagnostics/
+/bench/
+/recon/
+/state/
+/edid/
+/tests/
+/patches/legacy/
+/patches/_index_sources/
+/patches/README.md
+/tools/analyze2.py
+/tools/analyze_kalman.py
+/tools/build-track-a.sh
+/tools/install-patched-modules.sh
+# Python / build cruft.
+__pycache__/
+*.pyc
+*.o
+# Compiled probe binary (built from vkdisplays.c).
+/vkdisplays
+# Stale pre-upgrade / working-state backups + research scratch (kept on disk, not tracked).
+/pre-26.04-snapshot-*/
+/steamvr-monado-working-backup-*/
+/kalman-data/
+/logs/
+/captures/
+.analysis-venv/
+/worktrees/
+vendor/
+# Kernel-signing MOK (PRIVATE KEY — never commit).
+/infra/mok-kernel/
