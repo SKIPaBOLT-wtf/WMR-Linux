@@ -275,6 +275,29 @@ def cam_visible(led_cam: np.ndarray, led_normal_cam: np.ndarray, cam: Camera) ->
     return valid_project & in_x & in_y & facing
 
 
+def project_device_leds(
+    led_pos: np.ndarray,      # (L,3) LED positions, WMR/OpenCV model frame
+    led_nrm: np.ndarray,      # (L,3) LED normals
+    R_xr_dev: np.ndarray,     # device pose in OpenXR world
+    t_xr_dev: np.ndarray,
+    R_xr_hmd: np.ndarray,     # HMD IMU pose in OpenXR world
+    t_xr_hmd: np.ndarray,
+    cam: Camera,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project a device's VISIBLE LEDs (facing + in-image, per cam_visible) into one
+    camera, from OpenXR-world device+head poses. Returns (u, v) of the visible LEDs."""
+    R_cv_hmd, t_cv_hmd = pose_flip_YZ(R_xr_hmd, t_xr_hmd)
+    R_cv_mod, t_cv_mod = pose_flip_YZ(R_xr_dev, t_xr_dev)
+    R_cv_cam, t_cv_cam = pose_mul(R_cv_hmd, t_cv_hmd, cam.P_imu_cam_R, cam.P_imu_cam_t)
+    R_cam_cv, t_cam_cv = pose_inv(R_cv_cam, t_cv_cam)
+    R_cam_mod, t_cam_mod = pose_mul(R_cam_cv, t_cam_cv, R_cv_mod, t_cv_mod)
+    led_c = led_pos @ R_cam_mod.T + t_cam_mod
+    nrm_c = led_nrm @ R_cam_mod.T
+    vis = cam_visible(led_c, nrm_c, cam)
+    u, v, _ = rt8_project(led_c, cam)
+    return u[vis], v[vis]
+
+
 def in_fov_per_cam(
     pose_xrworld_device_R: np.ndarray,  # (N,3,3)
     pose_xrworld_device_t: np.ndarray,  # (N,3)

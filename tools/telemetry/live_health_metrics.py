@@ -310,31 +310,104 @@ def _fusion_metrics(fusion: np.ndarray) -> dict[str, Any]:
     return out
 
 
-def _reentry_metrics(fusion: np.ndarray) -> dict[str, Any]:
-    """GT-free re-entry scoring: pos_residual at the FIRST fold after an optical gap is the felt
-    snap distance (how far the coasted prediction sat from the re-acquired optical)."""
+#: Re-entry gap bins (C1 session-analysis 2026-07-03 definition: a coast episode is
+#: >60 ms between ACCEPTED optical folds; rejected attempts do not end a coast).
+REENTRY_GAP_BINS = (("60-100ms", 0.06, 0.1), ("100-300ms", 0.1, 0.3), ("300ms-1s", 0.3, 1.0),
+                    ("1-3s", 1.0, 3.0), (">3s", 3.0, math.inf))
+REENTRY_ROT_FLAG_DEG = 30.0
+
+
+def _reentry_metrics(fusion: np.ndarray, t0_ns: int | None = None) -> dict[str, Any]:
+    """GT-free re-entry scoring at the FIRST ACCEPTED fold after each optical gap:
+    pos_residual is the felt snap distance and rot_residual the ATTITUDE error the coast
+    carried (position-only snap scoring missed the 41-107 deg re-entry attitude errors
+    that ARE the felt left-controller fly-off -- c1-left-oov/findings.md, 2026-07-03)."""
     out: dict[str, Any] = {}
     for dev in (1, 2):
         rows = fusion[fusion["device_id"] == dev]
+        rows = rows[rows["outcome"] == 1]
         if rows.size < 3:
             continue
         rows = rows[np.argsort(rows["t_mono_ns"])]
-        gaps_ms = np.diff(rows["t_mono_ns"].astype(np.int64)) * 1e-6
-        resid_cm = rows["pos_residual_m"].astype(float) * 100.0
-        bins: dict[str, list[float]] = {"150-300ms": [], "300-700ms": [], "700ms+": []}
-        for i, gap in enumerate(gaps_ms):
-            r = resid_cm[i + 1]
-            if not math.isfinite(r):
+        t_ns = rows["t_mono_ns"].astype(np.int64)
+        gaps_s = np.diff(t_ns) * 1e-9
+        snap_cm = rows["pos_residual_m"].astype(float) * 100.0
+        rot_deg = rows["rot_residual_deg"].astype(float)
+        idx = np.flatnonzero(gaps_s > REENTRY_GAP_BINS[0][1])
+        re_i = idx + 1
+        fin = np.isfinite(snap_cm[re_i]) & np.isfinite(rot_deg[re_i])
+        idx, re_i = idx[fin], re_i[fin]
+        bins: dict[str, dict[str, Any]] = {}
+        for name, lo, hi in REENTRY_GAP_BINS:
+            sel = (gaps_s[idx] >= lo) & (gaps_s[idx] < hi)
+            if not sel.any():
                 continue
-            if 150.0 <= gap < 300.0:
-                bins["150-300ms"].append(r)
-            elif 300.0 <= gap < 700.0:
-                bins["300-700ms"].append(r)
-            elif gap >= 700.0:
-                bins["700ms+"].append(r)
+            bins[name] = {"snap_cm": _stat(snap_cm[re_i[sel]]), "rot_deg": _stat(rot_deg[re_i[sel]])}
+        t_base = int(t0_ns) if t0_ns is not None else (int(t_ns[0]) if t_ns.size else 0)
+        worst_order = np.argsort(-rot_deg[re_i])[:5]
         out[str(dev)] = {
             "name": DEVICE_NAMES.get(dev, str(dev)),
-            "reentry_snap_cm_by_gap": {k: _stat(np.array(v)) for k, v in bins.items() if v},
+            "reentries": int(idx.size),
+            "rot_gt30deg": int(np.sum(rot_deg[re_i] > REENTRY_ROT_FLAG_DEG)),
+            "reentry_rot_deg": _stat(rot_deg[re_i]),
+            "reentry_by_gap": bins,
+            "worst_rot": [
+                {
+                    "t_re_rel_s": round(float((t_ns[re_i[k]] - t_base) * 1e-9), 2),
+                    "gap_s": round(float(gaps_s[idx[k]]), 2),
+                    "snap_cm": round(float(snap_cm[re_i[k]]), 1),
+                    "rot_deg": round(float(rot_deg[re_i[k]]), 1),
+                }
+                for k in worst_order
+            ],
+        }
+    return out
+
+
+#: Live blob detection threshold: newer capture provenance snapshots carry
+#: blob_detect_threshold in hmd-cameras.json (t_constellation_tracking.c:325); older ones
+#: predate the field, so fall back to the deployed constant BLOB_THRESHOLD_MIN_WMR = 0x18
+#: (wmr_hmd.c) that every session to date has run with.
+BLOB_DETECT_THRESHOLD_WMR = 24
+
+
+def _blob_detect_threshold(capture: Path) -> tuple[float, str]:
+    for base in (capture, capture.parent):
+        p = base / "provenance" / "hmd-cameras.json"
+        if p.is_file():
+            cams = json.loads(p.read_text()).get("cameras", [])
+            vals = {c["blob_detect_threshold"] for c in cams if "blob_detect_threshold" in c}
+            if vals:
+                return float(max(vals)), str(p)
+    return float(BLOB_DETECT_THRESHOLD_WMR), "default BLOB_THRESHOLD_MIN_WMR"
+
+
+def _blob_margin_metrics(candidate: np.ndarray, threshold: float, threshold_src: str) -> dict[str, Any]:
+    """Per-device selected-fold blob brightness vs the detection threshold. A device whose
+    median selected-blob brightness sits AT the threshold is running with zero photometric
+    margin -- the dim-edge failure feeder behind the 2026-07-03 left fly-offs (dev1 median
+    23.8 == threshold 24 vs dev2 33.7; c1-left-oov/findings.md)."""
+    out: dict[str, Any] = {"threshold": threshold, "threshold_source": threshold_src}
+    for dev in (1, 2):
+        rows = candidate[(candidate["device_id"] == dev) & (candidate["selected"] != 0)]
+        if rows.size == 0:
+            continue
+        br = rows["blob_brightness_mean"].astype(float)
+        br = br[np.isfinite(br) & (br > 0)]
+        area = rows["blob_area_mean"].astype(float)
+        area = area[np.isfinite(area) & (area > 0)]
+        if br.size == 0:
+            continue
+        med = float(np.median(br))
+        out[str(dev)] = {
+            "name": DEVICE_NAMES.get(dev, str(dev)),
+            "n_selected": int(rows.size),
+            "brightness_med": round(med, 1),
+            "brightness_p25": round(float(np.percentile(br, 25)), 1),
+            "brightness_p10": round(float(np.percentile(br, 10)), 1),
+            "margin_med": round(med - threshold, 1),
+            "at_or_below_threshold_pct": round(float(100.0 * np.mean(br <= threshold)), 1),
+            "area_med": round(float(np.median(area)), 2) if area.size else None,
         }
     return out
 
@@ -588,13 +661,16 @@ def build_report(capture: Path, replay_dir: Path | None = None) -> dict[str, Any
         report["pose_attempt"] = _pose_metrics(streams["pose_attempt"])
     if "fusion" in streams:
         report["fusion"] = _fusion_metrics(streams["fusion"])
-        report["reentry"] = _reentry_metrics(streams["fusion"])
+        t0_ns = int(streams["imu"]["t_mono_ns"].min()) if streams.get("imu") is not None and streams["imu"].size else None
+        report["reentry"] = _reentry_metrics(streams["fusion"], t0_ns)
     if "event" in streams:
         report["event"] = _event_metrics(streams["event"])
     if "search" in streams:
         report["search"] = _search_metrics(streams["search"])
     if "candidate" in streams:
         report["candidate"] = _candidate_metrics(streams["candidate"])
+        threshold, threshold_src = _blob_detect_threshold(capture)
+        report["blob_margin"] = _blob_margin_metrics(streams["candidate"], threshold, threshold_src)
     if replay_dir is not None:
         report["replay"] = _replay_metrics(replay_dir)
         report["render_replay"] = _render_replay_metrics(replay_dir)
@@ -703,6 +779,31 @@ def print_summary(report: dict[str, Any]) -> None:
                 f"zero_fold_pct={_fmt(ev.get('eskf_zero_fold_pct'), 1)} "
                 f"seen_med={_fmt(ev['eskf_leds_seen']['median'], 1)} fold_med={_fmt(ev['eskf_fold_count']['median'], 1)}"
             )
+        margin = report.get("blob_margin", {}).get(dev, {})
+        if margin:
+            thr = report["blob_margin"]["threshold"]
+            flag = "  ** ZERO-MARGIN **" if margin["margin_med"] <= 0.5 else ""
+            print(
+                f"  blob_brightness_med/p25={_fmt(margin['brightness_med'], 1)}/{_fmt(margin['brightness_p25'], 1)} "
+                f"vs threshold {_fmt(thr, 0)} (margin_med={_fmt(margin['margin_med'], 1)}, "
+                f"<=thr {_fmt(margin['at_or_below_threshold_pct'], 1)}%) "
+                f"area_med={_fmt(margin['area_med'], 2)}{flag}"
+            )
+        reentry = report.get("reentry", {}).get(dev, {})
+        if reentry:
+            rr = reentry["reentry_rot_deg"]
+            print(
+                f"  reentries={reentry['reentries']} rot_med/p95/max_deg="
+                f"{_fmt(rr['median'], 1)}/{_fmt(rr['p95'], 1)}/{_fmt(rr['max'], 1)} "
+                f"rot>30deg={reentry['rot_gt30deg']}"
+            )
+            for e in reentry["worst_rot"]:
+                if e["rot_deg"] <= REENTRY_ROT_FLAG_DEG:
+                    break
+                print(
+                    f"    reentry t+{e['t_re_rel_s']}s gap={e['gap_s']}s "
+                    f"snap={e['snap_cm']}cm rot={e['rot_deg']}deg"
+                )
         if search:
             print(
                 f"  search_rows={search['work_rows']}/{search['rows']} work/total "

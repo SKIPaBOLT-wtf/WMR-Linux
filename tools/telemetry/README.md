@@ -59,6 +59,9 @@ All three accept the telemetry dir as the first arg (default `$G2_TELEMETRY` or
 | `mse_eval.py` | position/orientation MSE + flip-rate of a candidate (replay CSV or fusion) vs the cleaned-GT reference |
 | `test_cleaned_gt.py` | decoupled+adversarial tests for the cleaned-GT / MSE tooling (no telemetry needed) |
 | `m2p_decompose.py` | motion-to-photon stage latencies per device: IMU transport/batching age, fusion cadence, pose staleness + pull-cadence jitter at the SteamVR GetPose tap; `--perf-session` extends through a g2-studio frametiming session to a modeled M2P |
+| `live_health_metrics.py` | GT-free live-capture scorecard: cadences, ESKF fold health, search cost, capture gate, per-device selected-blob brightness-vs-threshold margin, re-entry snap **and rotation** residuals at the first accepted fold after each optical gap |
+| `head_battery.py` | N8 head-pose quality battery (head_pose + euroc gt + dev0 IMU): still-drift, moving gyro-unexplained jitter, IMU-gated resnap census, SLAM input/output gap census, per-cell stamp-skew estimate with bootstrap CIs (adopts the B1 estimator) |
+| `detect_ceiling.py` | detection fraction vs head-relative elevation (C2 top-edge regime): elevation-binned detection/accept/tracked curve, shoulder-50 scalar, camera-coverage boundary + hard-ceiling untracked dwell |
 
 > Cleaned-GT / MSE workflow: see `docs/audit-2026-05-24/11-mse-cleaned-gt.md`. The reference
 > is **self-referential** (built from the optical poses it scores) — read that doc for what it
