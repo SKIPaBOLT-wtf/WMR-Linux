@@ -332,6 +332,127 @@ def main():
     check("brief drift: no trim (sustain requirement)", trim == nh,
           f"trim={trim} drift={drift:.2f}m")
 
+
+    # ===================================================================
+    # C4: regression gate fail-safety (regression_check.check)
+    # ===================================================================
+    print("[23] C4 gate: a missing/NaN gated metric can never report 'ok'")
+    from regression_check import GUARDED, check as gate_check
+
+    def mk_metrics(**overrides):
+        mt = {
+            "yield_pct": 80.0, "pos_med_cm": 0.4, "wrong_branch_pct": 3.0,
+            "flip_rate_pct": 0.02, "fly_max_jump_m": 0.3,
+            "reentry_bf_err_cm_median": 4.0, "reentry_freeze_err_cm_median": 6.0,
+            "reentry_bf_err_cm_mean": 5.0, "reentry_freeze_err_cm_mean": 7.0,
+            "reentry_snap_m": 0.05, "fly_frac_beyond_reach": 0.001,
+            "anchor_tilt_flip_pct": 0.0, "anchor_yaw_flip_pct": 0.02,
+        }
+        mt.update(overrides)
+        return mt
+
+    base_cols = {"pred": {m.key: mk_metrics()[m.key] for m in GUARDED
+                          if "pred" in m.cols and not m.informational and m.floor_key is None}}
+    baseline = {"1": base_cols}
+
+    ok, rows = gate_check({1: {"pred": mk_metrics()}}, baseline, 2.0, 3.0)
+    check("clean metrics still pass", ok, str(rows))
+
+    ok, rows = gate_check({1: {"pred": mk_metrics(anchor_yaw_flip_pct=float("nan"))}},
+                          baseline, 2.0, 3.0)
+    st = {r[2]: r[6] for r in rows}
+    check("NaN anchor metric FAILs the gate (was silently 'ok')", not ok, str(st))
+    check("NaN anchor metric renders FAIL(n/a)", st.get("YAWflip%") == "FAIL(n/a)", str(st))
+
+    ok, rows = gate_check({1: {"pred": mk_metrics(flip_rate_pct=None)}}, baseline, 2.0, 3.0)
+    check("None flip rate (0/0 pairs) FAILs the gate", not ok,
+          str({r[2]: r[6] for r in rows}))
+
+    ok, rows = gate_check({1: {"pred": mk_metrics(reentry_bf_err_cm_median=None,
+                                                  reentry_freeze_err_cm_median=None)}},
+                          baseline, 2.0, 3.0)
+    st = {r[2]: r[6] for r in rows}
+    check("both-sided missing reentry floor renders n/a without failing",
+          ok and st.get("reentryErr") == "n/a", str(st))
+
+    ok, rows = gate_check({1: {"pred": mk_metrics(reentry_bf_err_cm_median=None)}},
+                          baseline, 2.0, 3.0)
+    st = {r[2]: r[6] for r in rows}
+    check("one-sided missing reentry floor FAILs (measurement vanished)",
+          (not ok) and st.get("reentryErr") == "FAIL(n/a)", str(st))
+
+    print("[24] C4 render: run_ab table renders None/NaN as n/a")
+    from run_ab import _fmt
+    check("None -> n/a", _fmt(None, "{:.2f}") == "n/a")
+    check("NaN -> n/a", _fmt(float("nan"), "{:.2f}") == "n/a")
+    check("number formats normally", _fmt(1.234, "{:.2f}") == "1.23")
+
+
+    print("[25] C2 sentinels: statistics that do not exist render None, never 0.00")
+    t1 = np.array([0], dtype=np.int64)
+    fm1 = fly_off_metrics(t1, np.zeros((1, 3)))
+    check("single pose: no jump statistic (None, not 0.0)",
+          fm1["max_jump_m"] is None and fm1["p99_jump_m"] is None and fm1["n_consecutive"] == 0,
+          str(fm1))
+    tg2 = (np.arange(3) * int(10e9)).astype(np.int64)  # all gaps >> FLY_GAP_MS
+    fm2 = fly_off_metrics(tg2, np.zeros((3, 3)))
+    check("all-gap trajectory: no jump statistic", fm2["max_jump_m"] is None, str(fm2))
+    jm = jitter_metric(tg2, np.zeros((3, 3)))
+    check("no contiguous run: jitter is None with n=0",
+          jm["rms_cm"] is None and jm["p95_cm"] is None and jm["n"] == 0, str(jm))
+
+    from mse_eval import reentry_accuracy_from_csv
+    import tempfile, os as _os
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as tf:
+        tf.write("t_ns,drop_optical,opt_valid,opt_px,opt_py,opt_pz,pred_px,pred_py,pred_pz\n")
+        for i in range(10):
+            tf.write(f"{i*22000000},0,1,0.1,0.2,0.3,0.1,0.2,0.3\n")
+        csv_path = tf.name
+    ra = reentry_accuracy_from_csv(csv_path)
+    _os.unlink(csv_path)
+    check("zero re-entry events: floor medians are None with n_events=0",
+          ra["bf_err_cm_median"] is None and ra["freeze_err_cm_median"] is None
+          and ra["n_events"] == 0, str(ra))
+
+
+    print("[26] C4 surface: run_ab forwards harness WARN/ERROR stderr even on rc=0")
+    from run_ab import run_replay_dual
+    import io, contextlib, stat, tempfile as _tf
+    with _tf.TemporaryDirectory() as td:
+        stub = _os.path.join(td, "stub_replay")
+        out_dir = _os.path.join(td, "out")
+        with open(stub, "w") as f:
+            f.write("#!/bin/bash\n"
+                    "echo 'WARN: frame 42 completion barrier timed out' >&2\n"
+                    "echo 'benign chatter' >&2\n"
+                    "touch \"$6/dev1.csv\" \"$6/dev2.csv\"\n")
+        _os.chmod(stub, stat.S_IRWXU)
+        cap = io.StringIO()
+        with contextlib.redirect_stderr(cap):
+            ok_run = run_replay_dual(stub, "f", "c", "t", "l", "r", out_dir)
+        err = cap.getvalue()
+        check("stub replay succeeds", ok_run, err)
+        check("WARN line is surfaced on rc=0", "completion barrier timed out" in err, repr(err))
+        check("benign stderr chatter is NOT forwarded", "benign chatter" not in err, repr(err))
+
+
+    print("[27] C4 tolerance: small-baseline pct metrics gate at max(floor, 5x baseline)")
+    ok, rows = gate_check({1: {"pred": mk_metrics(flip_rate_pct=0.2)}}, baseline, 2.0, 3.0)
+    check("10x flip-rate rise (0.02 -> 0.20) FAILS despite --tol-pct 2.0", not ok,
+          str({r[2]: r[6] for r in rows}))
+    ok, rows = gate_check({1: {"pred": mk_metrics(anchor_tilt_flip_pct=0.15)}}, baseline, 2.0, 3.0)
+    check("anchor flip appearing at 0.15 pts over a 0.0 baseline FAILS", not ok,
+          str({r[2]: r[6] for r in rows}))
+    ok, rows = gate_check({1: {"pred": mk_metrics(flip_rate_pct=0.05)}}, baseline, 2.0, 3.0)
+    check("a within-floor flip wiggle (0.02 -> 0.05) still passes", ok,
+          str({r[2]: r[6] for r in rows}))
+    ok, rows = gate_check({1: {"pred": mk_metrics(wrong_branch_pct=4.5)}}, baseline, 2.0, 3.0)
+    check("percent-scale wrong-branch keeps the old absolute gate (3.0 -> 4.5 passes)", ok,
+          str({r[2]: r[6] for r in rows}))
+    ok, rows = gate_check({1: {"pred": mk_metrics(wrong_branch_pct=5.5)}}, baseline, 2.0, 3.0)
+    check("wrong-branch beyond the absolute tolerance still FAILS (3.0 -> 5.5)", not ok,
+          str({r[2]: r[6] for r in rows}))
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

@@ -164,6 +164,12 @@ def run_replay_dual(binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir)
     if r.returncode != 0:
         sys.stderr.write(f"replay FAILED: {r.stderr.strip()[:400]}\n")
         return False
+    # Surface the harness's diagnostic stderr lines even on rc 0: capture_output swallowed
+    # WARN/ERROR lines (e.g. the completion-barrier timeout before it became fatal), making a
+    # degraded run invisible to every consumer of this table.
+    for line in (r.stderr or "").splitlines():
+        if any(key in line for key in ("WARN", "ERROR", "FATAL")):
+            sys.stderr.write(f"replay [{Path(out_dir).name}] {line}\n")
     ok = True
     for dev in (1, 2):
         csv_path = Path(out_dir) / f"dev{dev}.csv"
@@ -209,7 +215,7 @@ COLS = [
 
 def _fmt(v, fmt):
     try:
-        if isinstance(v, float) and np.isnan(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
             return "n/a"
         if fmt.endswith("%}"):
             return fmt.format(v)

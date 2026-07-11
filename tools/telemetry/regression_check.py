@@ -22,8 +22,9 @@ may still feed fusion, so they stay covered by the regular trajectory metrics in
 On scored forced-drop re-entries, body-follow prediction must be at least as accurate as a synthetic
 freeze counterfactual (last-seen position) on the SAME events.
 
-Gating: if the capture dir or the harness binary is absent, this exits 0 with a clear SKIP message so a
-capture-less / harness-less build is never broken by it.
+Gating: every skip path (missing scoring deps, capture dir, harness binary, controller jsons or
+baseline) exits 77 with a clear SKIP message -- the ctest registration's SKIP_RETURN_CODE 77 turns it
+into a LOUD ctest SKIP (mirroring coast_regression), never a silent pass.
 
 Usage:
   regression_check.py [--capture DIR] [--bin PATH] [--baseline JSON]
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -55,7 +57,7 @@ try:
     from manifest import DEVICE_NAMES
 except ImportError as e:
     print(f"SKIP: scoring deps unavailable ({e}) -- regression guardrail not run")
-    sys.exit(0)
+    sys.exit(77)
 
 # The faithful capture this guardrail is calibrated against (the in-headset capture used for tuning).
 DEFAULT_CAPTURE = os.path.expanduser("~/g2-linux-research/captures/20260524-200416-headpose")
@@ -114,14 +116,40 @@ GUARDED = [
 
 
 def _scaled(m, value):
-    return value * m.scale
+    return None if value is None else value * m.scale
 
 
-def _tol_for(m, tol_pct, yield_tol_pct):
-    """The tolerance for one metric: its own absolute tol if set, else the shared flip/yield scale."""
+def _missing(value):
+    """True when a metric value carries no measurement: absent, None, or non-finite.
+
+    NaN comparisons are all False, so without this a vanished metric (e.g. the head-pose anchor
+    stream silently absent -> anchor_*_flip_pct = NaN) sails through the gate as 'ok'."""
+    if value is None:
+        return True
+    try:
+        return not math.isfinite(value)
+    except TypeError:
+        return True
+
+
+# Shared-tolerance percentage metrics ride on tiny baselines (pinned flip rates are
+# 0.017-0.035%, anchor flips 0-0.02%): a flat 2.0-point absolute tolerance would let a ~100x
+# flip-rate regression pass. Gate them at max(floor, 5x baseline), never LOOSER than the
+# shared absolute tolerance (so percent-scale metrics like wrong-branch keep their old gate).
+PCT_TOL_FLOOR = 0.1
+PCT_TOL_REL = 5.0
+
+
+def _tol_for(m, tol_pct, yield_tol_pct, ref=None):
+    """The tolerance for one metric: its own absolute tol if set, else the shared flip/yield
+    scale, rescaled to the baseline for the small-baseline percentage metrics."""
     if m.tol is not None:
         return m.tol
-    return yield_tol_pct if m.key == "yield_pct" else tol_pct
+    if m.key == "yield_pct":
+        return yield_tol_pct
+    if ref is not None:
+        return min(tol_pct, max(PCT_TOL_FLOOR, PCT_TOL_REL * ref))
+    return tol_pct
 
 
 def measure(capture, binary, cams, left, right, out_dir, columns):
@@ -184,28 +212,44 @@ def check(measured, baseline, tol_pct, yield_tol_pct):
             for m in GUARDED:
                 if col not in m.cols:
                     continue
-                cur = _scaled(m, mt[m.key])
+                cur_raw = mt.get(m.key)
+                cur = None if _missing(cur_raw) else _scaled(m, cur_raw)
                 # A floor_key metric is gated against a live counterfactual computed from the SAME CSV
                 # (apples-to-apples), not against the stored JSON baseline.
                 if m.floor_key is not None:
-                    ref = _scaled(m, mt[m.floor_key])
+                    ref_raw = mt.get(m.floor_key)
+                    ref = None if _missing(ref_raw) else _scaled(m, ref_raw)
                 else:
-                    ref = base.get(m.key)
-                tol = _tol_for(m, tol_pct, yield_tol_pct)
-                if ref is None:
-                    rows.append((DEVICE_NAMES[dev], col, m.label, cur, float("nan"), float("nan"),
-                                 "info" if m.informational else "no-base"))
+                    ref_raw = base.get(m.key)
+                    ref = None if _missing(ref_raw) else ref_raw
+                if m.informational:
+                    # Printed for transparency, never gated; n/a renders as n/a.
+                    delta = cur - ref if (cur is not None and ref is not None) else float("nan")
+                    rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, delta, "info"))
                     continue
+                if cur is None and ref is None:
+                    # The failure-mode class is absent from BOTH sides of this run (e.g. a capture
+                    # with zero forced-drop re-entry events): render n/a loudly, nothing to gate.
+                    rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, float("nan"), "n/a"))
+                    continue
+                if cur is None:
+                    # The current run failed to produce a measurement the reference has: that is a
+                    # measurement regression, never an 'ok'. FAIL-safe.
+                    ok = False
+                    rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, float("nan"), "FAIL(n/a)"))
+                    continue
+                if ref is None:
+                    # Stored baseline predates this metric: visible, not gated (the committed
+                    # baseline makes this state loud in review).
+                    rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, float("nan"), "no-base"))
+                    continue
+                tol = _tol_for(m, tol_pct, yield_tol_pct, ref=ref)
                 delta = cur - ref
                 regressed = (delta > tol) if m.bad == "up" else (delta < -tol)
-                # Informational metrics are printed for transparency but never fail the gate.
-                if regressed and not m.informational:
+                if regressed:
                     ok = False
-                if m.informational:
-                    status = "info"
-                else:
-                    status = "FAIL" if regressed else "ok"
-                rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, delta, status))
+                rows.append((DEVICE_NAMES[dev], col, m.label, cur, ref, delta,
+                             "FAIL" if regressed else "ok"))
     return ok, rows
 
 
@@ -214,11 +258,13 @@ def print_table(rows, tol_pct, yield_tol_pct):
     print(f"{hdr[0]:<7} {hdr[1]:<5} {hdr[2]:<10} {hdr[3]:>9} {hdr[4]:>9} {hdr[5]:>9}  {hdr[6]}")
     print("-" * 62)
     for dev, col, label, cur, ref, delta, status in rows:
-        rs = "n/a" if ref != ref else f"{ref:9.2f}"
+        cs = "n/a" if (cur is None or cur != cur) else f"{cur:9.2f}"
+        rs = "n/a" if (ref is None or ref != ref) else f"{ref:9.2f}"
         ds = "n/a" if delta != delta else f"{delta:+9.2f}"
-        mark = " <== REGRESSION" if status == "FAIL" else ""
-        print(f"{dev:<7} {col:<5} {label:<10} {cur:9.2f} {rs} {ds}  {status}{mark}")
-    print(f"\ntolerance: {tol_pct:.2f}% (flip/branch/anchor), yield drop > {yield_tol_pct:.2f}%; "
+        mark = " <== REGRESSION" if status.startswith("FAIL") else ""
+        print(f"{dev:<7} {col:<5} {label:<10} {cs:>9} {rs:>9} {ds:>9}  {status}{mark}")
+    print(f"\ntolerance: flip/branch/anchor min({tol_pct:.2f}, max({PCT_TOL_FLOOR}, {PCT_TOL_REL:.0f}x baseline)) pts, "
+          f"yield drop > {yield_tol_pct:.2f}%; "
           f"posMed +1.5cm, flyMax/snap +0.15m; forced-drop reentryErr +5cm vs freeze counterfactual")
 
 
@@ -238,18 +284,19 @@ def main() -> int:
     args = ap.parse_args()
     columns = [c.strip() for c in args.cols.split(",") if c.strip()]
 
-    # Gating: skip cleanly (exit 0) so a capture-less / harness-less build never breaks.
+    # Gating: exit 77 (ctest SKIP_RETURN_CODE) so a capture-less / harness-less build reports a
+    # visible SKIP, never a fake green.
     if not Path(args.capture).is_dir():
         print(f"SKIP: capture not present ({args.capture}) -- regression guardrail not run")
-        return 0
+        return 77
     if not Path(args.bin).is_file():
         print(f"SKIP: harness binary not present ({args.bin}) -- build offline_vio_replay first")
-        return 0
+        return 77
 
     left, right = _find_controller_jsons(args.ctrl_left, args.ctrl_right)
     if not left or not right:
         print(f"SKIP: could not resolve controller jsons (pass --ctrl-left/--ctrl-right)")
-        return 0
+        return 77
 
     measured = measure(args.capture, args.bin, args.cams, left, right, args.out, columns)
     if measured is None:
@@ -269,7 +316,7 @@ def main() -> int:
 
     if not Path(args.baseline).is_file():
         print(f"SKIP: no baseline at {args.baseline} -- create it with --update")
-        return 0
+        return 77
     baseline = json.loads(Path(args.baseline).read_text()).get("metrics", {})
 
     ok, rows = check(measured, baseline, args.tol_pct, args.yield_tol_pct)

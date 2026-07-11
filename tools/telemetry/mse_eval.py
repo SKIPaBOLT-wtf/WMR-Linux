@@ -110,14 +110,16 @@ def fly_off_metrics(t, pos, arm_reach_m=ARM_REACH_M, gap_ms=FLY_GAP_MS):
     for i in range(1, n):
         if (t[i] - t[i - 1]) / 1e6 <= gap_ms:
             jumps.append(float(np.linalg.norm(pos[i] - pos[i - 1])))
-    jumps = np.array(jumps) if jumps else np.array([0.0])
+    # No consecutive pairs (e.g. a degenerate 1-3 pose run) means the jump statistic does not
+    # exist -- report None (renders n/a, gates fail-safe), never a measured-perfect 0.00.
+    ja = np.array(jumps) if jumps else None
     centre = np.median(pos, axis=0)
     dist = np.linalg.norm(pos - centre, axis=1)
     return dict(
-        max_jump_m=float(jumps.max()),
-        p99_jump_m=float(np.percentile(jumps, 99)),
+        max_jump_m=float(ja.max()) if ja is not None else None,
+        p99_jump_m=float(np.percentile(ja, 99)) if ja is not None else None,
         frac_beyond_reach=float((dist > arm_reach_m).mean()),
-        n_consecutive=int(jumps.shape[0]),
+        n_consecutive=len(jumps),
     )
 
 
@@ -149,7 +151,8 @@ def jitter_metric(t, pos, win=JITTER_WIN, gap_ms=FLY_GAP_MS):
             d += (pos[i, ax] - fit_i) ** 2
         resid.append(float(np.sqrt(d)))
     if not resid:
-        return dict(rms_cm=0.0, p95_cm=0.0, n=0)
+        # No contiguous run long enough to fit the local baseline: the statistic does not exist.
+        return dict(rms_cm=None, p95_cm=None, n=0)
     r = np.array(resid)
     return dict(rms_cm=float(np.sqrt(np.mean(r * r)) * 100.0),
                 p95_cm=float(np.percentile(r, 95) * 100.0), n=int(r.shape[0]))
@@ -185,6 +188,11 @@ INFORMATIVE_DISPLACEMENT_M = 0.15
 # Minimum dropout span (frames opt_valid=0 between the last valid and the re-entry) for an event to count
 # -- skip single-frame blips where freeze and BF are both ~perfect and the metric is noise.
 REENTRY_MIN_GAP_FRAMES = 2
+
+# Zero scored re-entry events: the floor metric does not exist for this run. None (rendered n/a,
+# gated fail-safe by regression_check) -- never a fabricated-perfect 0.0 in the gated direction.
+_REENTRY_NO_EVENTS = dict(bf_err_cm_median=None, freeze_err_cm_median=None,
+                          bf_err_cm_mean=None, freeze_err_cm_mean=None, n_events=0)
 
 
 def reentry_snap_m_from_csv(path):
@@ -233,12 +241,10 @@ def reentry_accuracy_from_csv(path):
         rd = csvmod.DictReader(f)
         fn = rd.fieldnames or []
         if "opt_valid" not in fn or "pred_px" not in fn:
-            return dict(bf_err_cm_median=0.0, freeze_err_cm_median=0.0,
-                        bf_err_cm_mean=0.0, freeze_err_cm_mean=0.0, n_events=0)
+            return _REENTRY_NO_EVENTS.copy()
         rows = list(rd)
     if len(rows) < 3:
-        return dict(bf_err_cm_median=0.0, freeze_err_cm_median=0.0,
-                    bf_err_cm_mean=0.0, freeze_err_cm_mean=0.0, n_events=0)
+        return _REENTRY_NO_EVENTS.copy()
     has_forced_drop = "drop_optical" in fn
     opt_valid = np.array([int(float(r.get("opt_valid", 0))) != 0 for r in rows])
     drop_optical = np.array([int(float(r.get("drop_optical", 0))) != 0 for r in rows]) if has_forced_drop else None
@@ -268,8 +274,7 @@ def reentry_accuracy_from_csv(path):
             last_valid_i = i
             forced_drop_since_last_valid = False
     if not bf_errs:
-        return dict(bf_err_cm_median=0.0, freeze_err_cm_median=0.0,
-                    bf_err_cm_mean=0.0, freeze_err_cm_mean=0.0, n_events=0)
+        return _REENTRY_NO_EVENTS.copy()
     bf = np.array(bf_errs); fz = np.array(fz_errs)
     return dict(
         bf_err_cm_median=float(np.median(bf)) * 100.0,
@@ -308,7 +313,8 @@ def compute_metrics(ref, t_c, pos_c, quat_c, n_total, match_ms, valid_only) -> d
         ori_med=float(np.median(ang)),
         ori_p90=float(np.percentile(ang, 90)),
         wrong_branch_pct=100.0 * float((ang > 90.0).mean()),
-        flip_rate_pct=100.0 * f / max(nf, 1),
+        # 0 flips over 0 scoreable pairs is NOT a measured 0.00% -- there is no measurement.
+        flip_rate_pct=(100.0 * f / nf) if nf > 0 else None,
         n_flip=int(f),
         n_flip_pairs=int(nf),
         fly_max_jump_m=fly["max_jump_m"],
@@ -395,11 +401,12 @@ def main() -> int:
           f"(median = {mt['ori_med']:.2f} deg, p90 = {mt['ori_p90']:.2f} deg)")
     print(f"  ORIENT    wrong-branch frames (>90deg vs ref) = {mt['wrong_branch_pct']:.2f}%  "
           f"(RMS is dominated by this tail)")
-    print(f"  CANDIDATE flip-rate = {mt['flip_rate_pct']:.2f}%  "
+    fnum = lambda v, spec="{:.2f}", mul=1.0: "n/a" if v is None else spec.format(v * mul)
+    print(f"  CANDIDATE flip-rate = {fnum(mt['flip_rate_pct'])}%  "
           f"({mt['n_flip']}/{mt['n_flip_pairs']} consecutive >= 90deg <= 120ms)")
-    print(f"  FLY-OFF   max-jump = {mt['fly_max_jump_m']*100:.1f} cm  p99-jump = "
-          f"{mt['fly_p99_jump_m']*100:.1f} cm  beyond-arm-reach = {mt['fly_frac_beyond_reach']*100:.2f}%")
-    print(f"  JITTER    RMS = {mt['jitter_rms_cm']:.3f} cm  p95 = {mt['jitter_p95_cm']:.3f} cm  "
+    print(f"  FLY-OFF   max-jump = {fnum(mt['fly_max_jump_m'], '{:.1f}', 100.0)} cm  p99-jump = "
+          f"{fnum(mt['fly_p99_jump_m'], '{:.1f}', 100.0)} cm  beyond-arm-reach = {mt['fly_frac_beyond_reach']*100:.2f}%")
+    print(f"  JITTER    RMS = {fnum(mt['jitter_rms_cm'], '{:.3f}')} cm  p95 = {fnum(mt['jitter_p95_cm'], '{:.3f}')} cm  "
           f"(pred vs its own smoothed self)")
     print(f"  YIELD     {mt['yield_pct']:.1f}%  ({mt['n_valid']}/{mt['n_total']} rows carried a pose)  "
           f"median-interval = {mt['median_interval_ms']:.1f} ms")
