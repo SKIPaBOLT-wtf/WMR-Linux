@@ -6,9 +6,12 @@ v2 cache.
 
 Tests assert BEHAVIOUR / CONTRACTS, not internals: a KNOWN synthetic mis-scaled/misaligned IMU is
 recovered within tolerance; the fits survive mirror-flip contamination; the recovered matrices pass
-the SAME plausibility band the C filter enforces ([0.8,1.25] singular values); and the cache
+the SAME plausibility band the C filter enforces ([0.8,1.25] singular values); the cache
 round-trips through the EXACT v2 text layout the C driver (wmr_controller_base.c imu_cal_parse) reads,
-preserving the online-owned bias/scale. No production binary, no telemetry files required.
+preserving the online-owned bias/scale; and axis-degenerate (single-axis) motion is REJECTED by the
+rank>=2 identifiability guard instead of returning an arbitrary misalignment (audit R4#25) — asserted
+on both the SoT fitter and the gyrofit_fast reimplementation. No production binary, no telemetry
+files required.
 
     ~/miniconda3/envs/g2vr/bin/python test_imu_calib.py
 Exits non-zero on any failure.
@@ -27,6 +30,10 @@ import numpy as np
 _spec = importlib.util.spec_from_file_location("ic", str(Path(__file__).resolve().parent / "imu_calib_from_optical.py"))
 ic = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ic)
+
+_gspec = importlib.util.spec_from_file_location("gf", str(Path(__file__).resolve().parent / "gyrofit_fast.py"))
+gf = importlib.util.module_from_spec(_gspec)
+_gspec.loader.exec_module(gf)
 
 G = 9.80665
 SV_MIN, SV_MAX = 0.8, 1.25  # mirrors the C filter's INTRINSICS_SV_MIN/MAX plausibility band
@@ -143,6 +150,40 @@ def fit_gyro(path):
     return ic.gyro_intrinsic_cleaned(its, gyro, pose[:, 0], pose[:, 4:8])
 
 
+def make_axis_limited_session(true_R, axes_used, seed=7, secs=60.0, noise_rad=0.002):
+    """The audit's Kabsch-degeneracy evidence base (results/code-audit-20260710 R4#25, V2's
+    v2_kabsch_repro2): device-frame motion about the given axes in equal contiguous time blocks,
+    the gyro measuring in a frame misaligned by true_R (device = true_R @ gyro), optical poses =
+    integrated device rotation + small-angle optical noise (0.002 rad ~ 0.11 deg default).
+    Returns (its, gyro, pt_ns, pq) ready for either gyro fitter."""
+    rng = np.random.default_rng(seed)
+    fs = 250.0
+    its = np.arange(0, secs, 1 / fs)
+    w_dev = np.zeros((len(its), 3))
+    seg = len(its) // len(axes_used)
+    for j, ax in enumerate(axes_used):
+        a = np.asarray(ax, float)
+        a /= np.linalg.norm(a)
+        s = slice(j * seg, (j + 1) * seg)
+        w_dev[s] = np.outer(2.0 * np.sin(2 * np.pi * 0.5 * its[s]), a)
+    gyro = w_dev @ true_R                      # w_gyro = R^T w_dev, as row vectors
+    q = np.array([0.0, 0.0, 0.0, 1.0])
+    qs = [q.copy()]
+    for i in range(len(its) - 1):
+        dt = its[i + 1] - its[i]
+        q = qmul(q, expq(0.5 * (w_dev[i] + w_dev[i + 1]) * dt))
+        q /= np.linalg.norm(q)
+        qs.append(q.copy())
+    qs = np.array(qs)
+    sel = np.arange(0, len(its), 3)            # ~83 Hz optical
+    pt = (its[sel] * 1e9).astype(np.int64)
+    pq = qs[sel].copy()
+    for k in range(len(pq)):
+        pq[k] = qmul(pq[k], expq(rng.normal(0, noise_rad, 3)))
+        pq[k] /= np.linalg.norm(pq[k])
+    return its, gyro, pt, pq
+
+
 def make_rest_session(T_a_true, n_orient, seed=0):
     """At-rest accel session in n_orient distinct orientations whose accel MEASURES
     a_meas = inv(T_a_true) @ g_body (so T_a_true @ a_meas == g_body, |.|=g)."""
@@ -165,7 +206,7 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "clean.replay")
         write_replay(p, *make_gyro_session(M_g_true, seed=1, secs=40.0))
-        Mg, ok, nseg, scale, mis, nfl = fit_gyro(p)
+        Mg, ok, nseg, scale, mis, nfl, axis_eig = fit_gyro(p)
         check("clean fit converges", ok and nseg > 50, f"ok={ok} nseg={nseg}")
         check("scale recovered within 1%", abs(scale - 1.03) < 0.01, f"scale={scale:.4f}")
         check("misalignment recovered within 1 deg", abs(mis - 6.0) < 1.0, f"mis={mis:.2f}")
@@ -184,7 +225,7 @@ def main():
         for seed in (2, 12, 22):
             p = os.path.join(d, f"dirty{seed}.replay")
             write_replay(p, *make_gyro_session(M_g_true, flips=0.25, optical_noise_deg=1.5, seed=seed, secs=40.0))
-            Mg, ok, nseg, scale, mis, nfl = fit_gyro(p)
+            Mg, ok, nseg, scale, mis, nfl, axis_eig = fit_gyro(p)
             check(f"[seed {seed}] fit converges and skips flips", ok and nfl > 0, f"ok={ok} nfl={nfl}")
             check(f"[seed {seed}] misalignment within 1.5 deg despite 25% flips", abs(mis - 6.0) < 1.5,
                   f"mis={mis:.2f}")
@@ -196,7 +237,7 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "id.replay")
         write_replay(p, *make_gyro_session(np.eye(3), seed=3, secs=40.0))
-        Mg, ok, nseg, scale, mis, nfl = fit_gyro(p)
+        Mg, ok, nseg, scale, mis, nfl, axis_eig = fit_gyro(p)
         check("identity-truth scale ~1.0", abs(scale - 1.0) < 0.01, f"scale={scale:.4f}")
         check("identity-truth misalignment ~0 deg", mis < 1.0, f"mis={mis:.2f}")
         check("identity-truth M_g close to I", np.abs(Mg - np.eye(3)).max() < 0.012,
@@ -206,7 +247,7 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "short.replay")
         write_replay(p, *make_gyro_session(M_g_true, seed=4, secs=2.0))  # ~too short to span 8 clean segs
-        Mg, ok, nseg, scale, mis, nfl = fit_gyro(p)
+        Mg, ok, nseg, scale, mis, nfl, axis_eig = fit_gyro(p)
         check("short session reports not-ok", not ok, f"ok={ok} nseg={nseg}")
         check("short session keeps identity M_g", np.allclose(Mg, np.eye(3)), str(Mg))
 
@@ -268,6 +309,39 @@ def main():
         check("M_g updated on the second pass", np.abs(mg - M_g_true).max() < 1e-6, "")
         check("T_a carried forward (not clobbered to identity)", np.abs(ta - T_a_true).max() < 1e-6,
               f"ta=\n{ta}")
+
+    print("[10] gyro: rank>=2 axis-identifiability guard (Kabsch degeneracy, audit R4#25) — BOTH fitters")
+    # Promoted from the audit validator's numerical repro (v2_kabsch_repro2): single-axis motion
+    # leaves the misalignment unidentifiable — about the motion axis it is INVISIBLE (fit ~0 for a
+    # true 3deg), orthogonal to it it is ARBITRARY (reproduced 131deg-wrong with ok=True pre-guard).
+    # Two independent axes fully identify it. Both fitters must return the SAME verdict and fit.
+    Rx3 = rot_axis_angle([1, 0, 0], np.deg2rad(3.0))
+    Rz3 = rot_axis_angle([0, 0, 1], np.deg2rad(3.0))
+    scenarios = [
+        ("single-axis X, mis about X (invisible)", Rx3, [[1, 0, 0]], False),
+        ("single-axis X, mis about Z (arbitrary null dir, the 131deg case)", Rz3, [[1, 0, 0]], False),
+        ("two-axis X+Y, mis about Z (rank 2 identifies)", Rz3, [[1, 0, 0], [0, 1, 0]], True),
+        ("three-axis, mis about X", Rx3, [[1, 0, 0], [0, 1, 0], [0, 0, 1]], True),
+    ]
+    for label, Rtrue, axes, expect_ok in scenarios:
+        its, gyro, pt, pq = make_axis_limited_session(Rtrue, axes)
+        res = {}
+        for name, fn in (("ic", ic.gyro_intrinsic_cleaned), ("fast", gf.gyro_intrinsic_cleaned_fast)):
+            Mg, ok, nseg, scale, mis, nfl, axis_eig = fn(its, gyro, pt, pq)
+            res[name] = (Mg, ok, nseg)
+            check(f"{label} [{name}]: ok is {expect_ok}", ok == expect_ok,
+                  f"ok={ok} nseg={nseg} axis_eig={np.round(axis_eig, 4)}")
+            if expect_ok:
+                U, _, Vt = np.linalg.svd(Mg)
+                err = mis_deg((U @ Vt) @ Rtrue.T)
+                check(f"{label} [{name}]: recovers R_md within 0.1 deg", err < 0.1, f"err={err:.3f}deg")
+            else:
+                check(f"{label} [{name}]: keeps identity M_g", np.allclose(Mg, np.eye(3)), str(Mg))
+        check(f"{label}: fitters agree (ok, nseg, |dM|_F < 1e-3)",
+              res["ic"][1] == res["fast"][1] and res["ic"][2] == res["fast"][2]
+              and np.linalg.norm(res["ic"][0] - res["fast"][0]) < 1e-3,
+              f"ic=({res['ic'][1]},{res['ic'][2]}) fast=({res['fast'][1]},{res['fast'][2]}) "
+              f"|dM|={np.linalg.norm(res['ic'][0] - res['fast'][0]):.2e}")
 
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

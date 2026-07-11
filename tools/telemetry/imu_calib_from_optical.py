@@ -43,6 +43,21 @@ import numpy as np
 
 G = 9.80665
 
+# Identifiability floor for the SECOND eigenvalue of the angle-weighted gyro rotation-axis scatter
+# S = sum(w*n*n^T)/sum(w) (unit axes -> trace(S)=1, eigenvalues descending). Kabsch needs TWO
+# independent rotation axes to identify the misalignment (rank>=2; unlike the accel ellipsoid it
+# does NOT need rank 3): with single-axis motion the R_md component about the motion axis is
+# invisible and the orthogonal component is arbitrary (audit R4#25, reproduced: 131deg-wrong fit
+# returned ok=True; no downstream SV-band check can catch a wrong rotation).
+# Floor derivation (audit W0, 2026-07-10; second-axis energy-fraction sweep on the v2_kabsch_repro
+# synthetic + real-capture spectra): eig1 tracks the second-axis energy fraction almost 1:1.
+# Exactly single-axis motion -> eig1 ~ 1e-18; 0.5% second-axis energy -> eig1 ~ 0.003 with
+# 0.8-4.7deg misalignment error; eig1 >= 0.01 keeps the error <= 0.35deg at realistic 0.11deg
+# optical noise (<= ~1deg even at a pessimistic 0.5deg). Real fitter-path spectra: weakest
+# accepted dev1 windows eig1 = 0.076-0.081, dev2 positive control ~0.13-0.2. Floor 0.02 sits
+# ~7x above the near-degenerate class and >=3.8x below every real accepted capture.
+GYRO_AXIS_EIG_FLOOR = 0.02
+
 
 def fit_accel_ellipsoid(rest_accel):
     """Symmetric accel-ellipsoid correction T from at-rest samples, matching the live filter's
@@ -176,9 +191,16 @@ def gyro_intrinsic_cleaned(its, gyro, pt, pq, min_seg_deg=12.0, consist_deg=30.0
       - scale: robust median of theta_opt/theta_gyro over the segments.
     M_g = R_md @ (scale * I). This physically-STRUCTURED estimate (rotation x scale) is robust to optical
     orientation noise, whereas a per-short-interval 3x3 affine fit suffers attenuation bias (noisy
-    response + residual flips bias the slope low) and can fall outside the plausibility band. Returns
-    (M_g, ok, n_segments, scale, mis_deg, n_flips_skipped); ok=False (M_g=identity) when too few clean
-    segments to identify the misalignment."""
+    response + residual flips bias the slope low) and can fall outside the plausibility band.
+
+    Identifiability: the misalignment is only observable in the span of the segment rotation axes,
+    so the accepted axes must cover rank>=2 -- the second eigenvalue of the angle-weighted gyro-axis
+    scatter must clear GYRO_AXIS_EIG_FLOOR (see its derivation note). Returns
+    (M_g, ok, n_segments, scale, mis_deg, n_flips_skipped, axis_eig); axis_eig is the descending
+    eigenvalue spectrum of that scatter (trace 1; nan-filled when no segments survive), reported so
+    the operator always sees the axis coverage behind a fit. ok=False (M_g=identity) when too few
+    clean segments OR the axis coverage is rank-deficient (single-axis motion -> the fit would be
+    arbitrary in the null direction)."""
     ratios = []
     ag, ao, wts = [], [], []   # gyro/optical rotation axes + weights, for misalignment (Kabsch)
     anchor = 0
@@ -202,9 +224,14 @@ def gyro_intrinsic_cleaned(its, gyro, pt, pq, min_seg_deg=12.0, consist_deg=30.0
         else:
             flips += 1  # i disagrees grossly (mirror flip or noise) -> skip it, keep anchor
         i += 1
-    if len(ag) < 8:
-        return np.eye(3), False, len(ratios), float("nan"), float("nan"), flips
     ag = np.array(ag); ao = np.array(ao); w = np.array(wts)
+    if len(ag):
+        S = (ag * w[:, None]).T @ ag / w.sum()   # angle-weighted gyro-axis scatter, trace 1
+        axis_eig = np.linalg.eigvalsh(S)[::-1]
+    else:
+        axis_eig = np.full(3, float("nan"))
+    if len(ag) < 8 or axis_eig[1] < GYRO_AXIS_EIG_FLOOR:
+        return np.eye(3), False, len(ratios), float("nan"), float("nan"), flips, axis_eig
     # Kabsch: device-axis = R_md @ gyro-axis. Solve R_md from the clean axis pairs (weighted by angle).
     H = (ao * w[:, None]).T @ ag
     U, _, Vt = np.linalg.svd(H)
@@ -215,22 +242,7 @@ def gyro_intrinsic_cleaned(its, gyro, pt, pq, min_seg_deg=12.0, consist_deg=30.0
     rr = np.array(ratios)
     rr = rr[(rr > 0.5) & (rr < 1.5)]   # drop residual mirror-flip ratios before the median
     scale = float(np.median(rr)) if len(rr) else 1.0
-    return R @ (scale * np.eye(3)), True, len(ratios), scale, mis, flips
-
-
-def huber_fit(x, y, delta=None, iters=12):
-    """Robust 1-D affine fit y ~ a*x + b via IRLS with Huber weights. Returns (a, b, w)."""
-    a, b = np.polyfit(x, y, 1)
-    for _ in range(iters):
-        r = y - (a * x + b)
-        s = 1.4826 * np.median(np.abs(r - np.median(r))) + 1e-12
-        d = (delta if delta else 1.5) * s
-        w = np.where(np.abs(r) <= d, 1.0, d / np.abs(r))
-        W = np.sqrt(w)
-        A = np.vstack([x * W, W]).T
-        sol, *_ = np.linalg.lstsq(A, y * W, rcond=None)
-        a, b = sol
-    return a, b, w
+    return R @ (scale * np.eye(3)), True, len(ratios), scale, mis, flips, axis_eig
 
 
 def main():
@@ -292,9 +304,18 @@ def main():
 
     # PERSISTED M_g: physically-structured (misalignment rotation x scalar scale) from flip-cleaned,
     # long high-rotation segments. This is the robust answer the cache stores and the filter applies.
-    M, m_ok, nseg, scale, mis, nfl = gyro_intrinsic_cleaned(its, gyro, pt, pq)
-    print(f"  M_g from {nseg} flip-cleaned segments >=12deg ({nfl} flips skipped): "
-          f"{'OK' if m_ok else 'too few clean segments (kept identity)'}")
+    M, m_ok, nseg, scale, mis, nfl, axis_eig = gyro_intrinsic_cleaned(its, gyro, pt, pq)
+    if m_ok:
+        verdict = "OK"
+    elif nseg < 8:
+        verdict = "too few clean segments (kept identity)"
+    else:
+        verdict = (f"axis coverage rank<2 (eig[1]={axis_eig[1]:.4f} < floor {GYRO_AXIS_EIG_FLOOR}; "
+                   f"kept identity — rotate about a second axis to identify the misalignment)")
+    print(f"  M_g from {nseg} flip-cleaned segments >=12deg ({nfl} flips skipped): {verdict}")
+    if np.all(np.isfinite(axis_eig)):
+        print(f"    axis-coverage eigenvalues = {np.array2string(axis_eig, precision=3)} "
+              f"(identifiability floor on eig[1]: {GYRO_AXIS_EIG_FLOOR})")
     if m_ok:
         print(f"    scale = {scale:.4f}   gyro->device misalignment = {mis:.2f} deg")
         print(f"    M_g =\n{np.array2string(M, precision=4, prefix='        ')}")
