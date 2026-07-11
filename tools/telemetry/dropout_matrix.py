@@ -124,6 +124,23 @@ REQUIRED_ROW_KEYS = (
     "pred_position_p95_cm",
     "all_pos_p95_cm",
     "wrong_branch_pct_scored",
+    # Shrinkage/evidence denominators: shrunk_pct leaves a raw value untouched and
+    # evidence_weight ramps a term to zero when its count is missing, so a schema that
+    # silently drops these counts would silently disengage shrinkage (and conditional
+    # terms) while still printing green. Police them like the metrics they weight.
+    "all_scoreable_frames",
+    "all_scoreable_position_tracked",
+    "pred_scored_frames",
+    "pred_tp",
+    "pred_fn",
+    "pred_position_tp",
+    "pred_position_fn",
+    "pred_position_fp",
+    "forced_drop_visible_frames",
+    "forced_drop_visible_reported",
+    "forced_drop_visible_position_tracked",
+    "stale_visible_frames",
+    "stale_position_tracked",
 )
 REQUIRED_IDENTITY_KEYS = (
     "identity_other_report_explains_ref",
@@ -232,6 +249,52 @@ def evidence_weight(count: Any) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
+#: Denominator count at which a percentage term's raw value carries no small-sample
+#: granularity worth damping. A raw percentage on n frames moves in 100/n-point steps
+#: from a SINGLE frame (n=12: 100 -> 91.67), while its own binomial standard error is
+#: 100*sqrt(q(1-q)/n); quantization dominates sampling noise for n < 1/(q(1-q)), which
+#: at the scorer's strictest target (q=0.98) is 51.02. Below ESTIMATE_FULL_N the
+#: estimate is therefore shrunk toward its loss-neutral prior; at or above it the raw
+#: value is used EXACTLY, so well-evidenced cells are bit-identical to the pre-shrink
+#: scorer. One constant, no per-term tuning.
+ESTIMATE_FULL_N = 51.0
+
+
+def shrunk_pct(value: Any, count: Any, neutral: float) -> float | None:
+    """Uncertainty-aware small-sample percentage estimate.
+
+    Posterior mean under an evidence-budget prior: for n < ESTIMATE_FULL_N the missing
+    (N - n) frames are scored at the term's loss-neutral rate, i.e. the Beta-posterior
+    mean with prior strength max(0, N - n) centered on `neutral`:
+
+        p_hat = neutral + (n / N) * (p - neutral)          (= (k + (N - n) * q0) / N)
+
+    Single-frame sensitivity is thereby bounded at 100/N points for every n (the raw
+    estimate steps 100/n, unbounded as n shrinks), the shrink weight decays linearly as
+    evidence accumulates (a posterior mean is linear in counts; the smoothstep above is
+    the WEIGHT gate, not an estimator), and the shrink is exactly zero at n >= N —
+    unlike constant-strength Laplace/Wilson forms, which would perturb every large-n
+    cell and silently re-calibrate the recorded history. Values at or above a shortfall
+    target (or at an excess limit) stay loss-free at any n, since the shrink pulls
+    toward the neutral point, never past it. A missing denominator leaves the raw value
+    untouched (schema gaps are policed by the hard-fail keys, never a free pass here).
+    """
+    pct = as_float(value)
+    if pct is None:
+        return None
+    n = as_float(count)
+    if n is None or n >= ESTIMATE_FULL_N:
+        return pct
+    return neutral + (max(n, 0.0) / ESTIMATE_FULL_N) * (pct - neutral)
+
+
+def count_sum(*values: Any) -> float | None:
+    parts = [as_float(value) for value in values]
+    if any(part is None for part in parts):
+        return None
+    return sum(parts)
+
+
 def shortfall_loss(value: float | None, target: float, scale: float, weight: float) -> float:
     if value is None:
         return weight * math.log1p(16.0)
@@ -246,6 +309,20 @@ def excess_loss(value: float | None, limit: float, scale: float, weight: float) 
     return weight * math.log1p(excess * excess)
 
 
+def shortfall_pct_loss(value: Any, count: Any, target: float, scale: float, weight: float) -> float:
+    """shortfall_loss on a percentage whose denominator is `count`, small-n shrunk.
+
+    The shrink prior is the loss-neutral point itself (the target), so the target is
+    named once and the two cannot drift.
+    """
+    return shortfall_loss(shrunk_pct(value, count, target), target, scale, weight)
+
+
+def excess_pct_loss(value: Any, count: Any, limit: float, scale: float, weight: float) -> float:
+    """excess_loss on a percentage whose denominator is `count`, small-n shrunk."""
+    return excess_loss(shrunk_pct(value, count, limit), limit, scale, weight)
+
+
 def objective_for_row(row: dict[str, Any]) -> dict[str, Any]:
     """Nonlinear row objective.
 
@@ -254,7 +331,9 @@ def objective_for_row(row: dict[str, Any]) -> dict[str, Any]:
     failures dominate small normal-path wins instead of being averaged away.
     Conditional stale/forced-drop terms carry per-term continuous evidence
     weights (evidence_weight of each term's own denominator count) instead of a
-    hard n>=10 block gate.
+    hard n>=10 block gate, and every percentage term is scored through the
+    small-sample shrinkage estimator (shrunk_pct of its own denominator) so one
+    frame in a small denominator cannot step a cell by whole points.
     """
     hard_fail: list[str] = []
     if (as_float(row.get("identity_strict_two_way_swap_frames")) or 0.0) > 0.0:
@@ -295,20 +374,27 @@ def objective_for_row(row: dict[str, Any]) -> dict[str, Any]:
         loss += value
         weight_sum += weight
 
-    # Position dominates the objective. Targets are in percentages or cm.
+    # Position dominates the objective. Targets are in percentages or cm. Every
+    # percentage term is shrunk against ITS OWN denominator (shrunk_pct).
+    all_scoreable_frames = row.get("all_scoreable_frames")
+    all_scoreable_position_tracked = row.get("all_scoreable_position_tracked")
     add(
         "position_tracked_correct_yield",
-        shortfall_loss(row.get("all_scoreable_position_tracked_correct_pct"), 95.0, 5.0, 8.0),
+        shortfall_pct_loss(row.get("all_scoreable_position_tracked_correct_pct"),
+                           all_scoreable_frames, 95.0, 5.0, 8.0),
         8.0,
     )
     add(
         "position_reported_correct_yield",
-        shortfall_loss(row.get("all_scoreable_reported_position_correct_pct"), 95.0, 5.0, 3.0),
+        shortfall_pct_loss(row.get("all_scoreable_reported_position_correct_pct"),
+                           all_scoreable_frames, 95.0, 5.0, 3.0),
         3.0,
     )
     add(
         "visible_position_recall",
-        shortfall_loss(pct_fraction(row.get("pred_position_recall")), 95.0, 3.0, 4.0),
+        shortfall_pct_loss(pct_fraction(row.get("pred_position_recall")),
+                           count_sum(row.get("pred_position_tp"), row.get("pred_position_fn")),
+                           95.0, 3.0, 4.0),
         4.0,
     )
     add("position_rmse", excess_loss(row.get("pred_position_rmse_cm"), 1.0, 1.5, 3.0), 3.0)
@@ -320,49 +406,63 @@ def objective_for_row(row: dict[str, Any]) -> dict[str, Any]:
     # (measured: +3 points while tracked-accuracy craters 91% -> 73%).
     add(
         "position_tracked_accuracy",
-        shortfall_loss(row.get("all_scoreable_position_tracked_accuracy_pct"), 98.0, 3.0, 6.0),
+        shortfall_pct_loss(row.get("all_scoreable_position_tracked_accuracy_pct"),
+                           all_scoreable_position_tracked, 98.0, 3.0, 6.0),
         6.0,
     )
     add(
         "position_precision",
-        shortfall_loss(pct_fraction(row.get("pred_position_precision")), 97.0, 2.0, 4.0),
+        shortfall_pct_loss(pct_fraction(row.get("pred_position_precision")),
+                           count_sum(row.get("pred_position_tp"), row.get("pred_position_fp")),
+                           97.0, 2.0, 4.0),
         4.0,
     )
 
     # Orientation matters, but after position.
-    add("full_pose_true_recall", shortfall_loss(pct_fraction(row.get("pred_recall")), 95.0, 5.0, 1.5), 1.5)
-    add("wrong_branch", excess_loss(row.get("wrong_branch_pct_scored"), 0.0, 0.25, 8.0), 8.0)
+    add(
+        "full_pose_true_recall",
+        shortfall_pct_loss(pct_fraction(row.get("pred_recall")),
+                           count_sum(row.get("pred_tp"), row.get("pred_fn")),
+                           95.0, 5.0, 1.5),
+        1.5,
+    )
+    add(
+        "wrong_branch",
+        excess_pct_loss(row.get("wrong_branch_pct_scored"),
+                        row.get("pred_scored_frames"), 0.0, 0.25, 8.0),
+        8.0,
+    )
 
     # OOV/dead-reckon terms are only active when the regime actually creates those
     # denominators; each term's weight ramps with ITS OWN denominator count so scarce
     # evidence (2-frame accuracies, single-digit tail p95s) is damped, never cliffed.
-    def add_evidenced(name: str, count: Any, weight: float, loss_fn: Any, value: Any, *loss_args: float) -> None:
+    def add_evidenced(name: str, count: Any, weight: float, loss_fn: Any, value: Any, *loss_args: Any) -> None:
         w = weight * evidence_weight(count)
         if w > 0.0:
             add(name, loss_fn(value, *loss_args, w), w)
 
     forced_reported = row.get("forced_drop_visible_reported")
     forced_position_tracked = row.get("forced_drop_visible_position_tracked")
-    add_evidenced("forced_drop_true_position_yield", forced_frames, 8.0, shortfall_loss,
-                  row.get("forced_drop_visible_position_tracked_correct_pct"), 95.0, 5.0)
-    add_evidenced("forced_drop_reported_position_yield", forced_frames, 3.0, shortfall_loss,
-                  row.get("forced_drop_visible_reported_position_correct_pct"), 95.0, 5.0)
+    add_evidenced("forced_drop_true_position_yield", forced_frames, 8.0, shortfall_pct_loss,
+                  row.get("forced_drop_visible_position_tracked_correct_pct"), forced_frames, 95.0, 5.0)
+    add_evidenced("forced_drop_reported_position_yield", forced_frames, 3.0, shortfall_pct_loss,
+                  row.get("forced_drop_visible_reported_position_correct_pct"), forced_frames, 95.0, 5.0)
     add_evidenced("forced_drop_tracked_tail", forced_position_tracked, 4.0, excess_loss,
                   row.get("forced_drop_visible_position_tracked_p95_cm"), 5.0, 3.0)
     add_evidenced("forced_drop_all_tail", forced_reported, 2.0, excess_loss,
                   row.get("forced_drop_visible_p95_cm"), 10.0, 5.0)
-    add_evidenced("forced_drop_position_tracked_accuracy", forced_position_tracked, 4.0, shortfall_loss,
-                  row.get("forced_drop_visible_position_tracked_accuracy_pct"), 98.0, 3.0)
+    add_evidenced("forced_drop_position_tracked_accuracy", forced_position_tracked, 4.0, shortfall_pct_loss,
+                  row.get("forced_drop_visible_position_tracked_accuracy_pct"), forced_position_tracked, 98.0, 3.0)
 
     stale_position_tracked = row.get("stale_position_tracked")
-    add_evidenced("stale_true_position_yield", stale_frames, 5.0, shortfall_loss,
-                  row.get("stale_position_tracked_correct_pct"), 95.0, 5.0)
-    add_evidenced("stale_reported_position_yield", stale_frames, 2.0, shortfall_loss,
-                  row.get("stale_reported_position_correct_pct"), 95.0, 5.0)
+    add_evidenced("stale_true_position_yield", stale_frames, 5.0, shortfall_pct_loss,
+                  row.get("stale_position_tracked_correct_pct"), stale_frames, 95.0, 5.0)
+    add_evidenced("stale_reported_position_yield", stale_frames, 2.0, shortfall_pct_loss,
+                  row.get("stale_reported_position_correct_pct"), stale_frames, 95.0, 5.0)
     add_evidenced("stale_tracked_tail", stale_position_tracked, 3.0, excess_loss,
                   row.get("stale_position_tracked_pos_p95_cm"), 5.0, 3.0)
-    add_evidenced("stale_position_tracked_accuracy", stale_position_tracked, 3.0, shortfall_loss,
-                  row.get("stale_position_tracked_accuracy_pct"), 98.0, 3.0)
+    add_evidenced("stale_position_tracked_accuracy", stale_position_tracked, 3.0, shortfall_pct_loss,
+                  row.get("stale_position_tracked_accuracy_pct"), stale_position_tracked, 98.0, 3.0)
 
     score = 0.0 if hard_fail else 100.0 * math.exp(-loss / max(weight_sum, 1.0))
     return {
@@ -517,6 +617,12 @@ def flatten(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "pred_f1": metric(result, "pred", "f1"),
             "pred_precision": metric(result, "pred", "precision"),
             "pred_recall": metric(result, "pred", "recall"),
+            "pred_tp": metric(result, "pred", "TP"),
+            "pred_fn": metric(result, "pred", "FN"),
+            "pred_position_tp": metric(result, "pred", "position_TP"),
+            "pred_position_fn": metric(result, "pred", "position_FN"),
+            "pred_position_fp": metric(result, "pred", "position_FP"),
+            "pred_scored_frames": metric(result, "pred", "n_scoreable_frames"),
             "pred_rmse_cm": metric(result, "pred", "pos_rmse_cm"),
             "pred_p95_cm": metric(result, "pred", "pos_p95_cm"),
             "pred_position_f1": metric(result, "pred", "position_f1"),
@@ -784,6 +890,13 @@ def main() -> int:
     if not args.binary.exists():
         parser.error(f"binary not found: {args.binary}")
     args.binary = args.binary.resolve()
+    # Resolve against the invoker's CWD now: replays run with a per-cell cwd, which would
+    # silently re-anchor relative paths (the H2-era dev2refit probe mis-run class).
+    for name in ("cams", "ctrl_left", "ctrl_right"):
+        path = getattr(args, name)
+        if not path.exists():
+            parser.error(f"--{name.replace('_', '-')} file not found: {path}")
+        setattr(args, name, path.resolve())
 
     captures = args.capture or ["xv1", "clean2"]
     regimes = args.regime or ["normal", "periodic-300", "bursts-short", "bursts-long"]
