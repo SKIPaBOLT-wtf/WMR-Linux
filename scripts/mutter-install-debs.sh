@@ -14,6 +14,6 @@ for p in "${PKGS[@]}"; do
 done
 [ ${#debs[@]} -gt 0 ] || { echo "ERR: no +g2~ mutter debs in $DEB_DIR" >&2; exit 1; }
 
-apt-get install -y --allow-downgrades "${debs[@]}"
+apt-get install -y --allow-change-held-packages --allow-downgrades "${debs[@]}"
 apt-mark hold "${PKGS[@]}"
 echo "installed + held ${#debs[@]} patched mutter debs"
