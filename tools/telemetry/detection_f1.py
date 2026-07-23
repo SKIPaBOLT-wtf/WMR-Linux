@@ -435,6 +435,7 @@ def analyse_device(
     match_ms: float,
     max_ref_gap_ms: float,
     cand_telem: Path | None = None,
+    dump_fn: Path | None = None,
 ) -> dict:
     """If cand_telem is provided, the cleaned-GT reference is built from `telem` (the reference
     capture) and the pose_attempts are read from `cand_telem` (the candidate). Otherwise both
@@ -550,6 +551,41 @@ def analyse_device(
             "correct_from_cam": int(sum(correct[i] for i in range(len(accepted)) if accepted[i]["cam_id"] == j)),
         })
 
+    if dump_fn is not None:
+        # FN forensics: for every in-view frame without a correct accept, record whether an
+        # accept existed (wrong-accept vs no-accept) and how many blobs sit near the projected
+        # LED cloud in the best camera — separating "matcher had data and failed" from "nothing
+        # detected". Joins on hw_ts_ns + cam_id, the same keys the scorer itself uses.
+        bl = G.load_stream(telem, m, "blob")
+        bl_t = bl["hw_ts_ns"].astype(np.int64)
+        fn_idx = np.where(in_view & ~frame_has_correct)[0]
+        recs = []
+        for i in fn_idx:
+            j = int(np.argmax(led_count[i]))
+            u, v = project_device_leds(led_pos, led_nrm, R_ref[i], pos_query[i],
+                                       R_head[i], hp_p_at[i], cams[j])
+            n_near = 0
+            near_bright = float("nan")
+            if len(u):
+                cu, cv = float(np.mean(u)), float(np.mean(v))
+                b = bl[(bl_t == int(t_query[i])) & (bl["cam_id"] == j)]
+                if len(b):
+                    d = np.hypot(b["x"].astype(float) - cu, b["y"].astype(float) - cv)
+                    nb = b[d < 120.0]
+                    n_near = int(len(nb))
+                    if n_near:
+                        near_bright = float(np.median(nb["brightness"]))
+            recs.append({
+                "t_hw_ns": int(t_query[i]),
+                "best_cam": j,
+                "leds_in_view": int(led_count[i][j]),
+                "had_accept": bool(frame_has_accept[i]),
+                "blobs_near_120px": n_near,
+                "near_brightness_med": near_bright,
+            })
+        json.dump(recs, open(dump_fn, "w"))
+        print(f"dev{dev}: dumped {len(recs)} FN records -> {dump_fn}", file=sys.stderr)
+
     return {
         "device": dev,
         "n_ref_frames": int(t_query.shape[0]),
@@ -593,6 +629,8 @@ def main():
     ap.add_argument("--ctrl-left", default=DEFAULT_CTRL_LEFT)
     ap.add_argument("--ctrl-right", default=DEFAULT_CTRL_RIGHT)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--dump-fn", default=None,
+                    help="dump per-FN-frame forensic records (JSON prefix; -dev{N}.json appended)")
     args = ap.parse_args()
 
     capture = Path(args.capture)
@@ -614,7 +652,8 @@ def main():
         r = analyse_device(ref_capture, ref_telem_dir, dev, cams, ctrl,
                            args.mse_pos_cm, args.mse_ori_deg, args.min_leds,
                            args.match_ms, args.max_ref_gap_ms,
-                           cand_telem=(cand_telem_dir if args.reference else None))
+                           cand_telem=(cand_telem_dir if args.reference else None),
+                           dump_fn=(Path(f"{args.dump_fn}-dev{dev}.json") if args.dump_fn else None))
         if r:
             results.append(r)
 
