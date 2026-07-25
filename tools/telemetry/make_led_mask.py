@@ -21,6 +21,7 @@ import numpy as np
 import detection_f1 as DF
 import blob_explain as BE
 import gt_blob_fix as GF
+import replay_contract as RC
 from headpose_anchor import load_head_pose
 from tracking_metrics import build_reference_grid, load_cameras
 
@@ -39,9 +40,10 @@ def main() -> int:
     args = ap.parse_args()
 
     g2cam, _ = BE._lazy_imports()
-    cams = DF.load_cameras(g2cam.HMD_CAMERAS.as_posix())
-    tm_cams = load_cameras(Path(g2cam.HMD_CAMERAS.as_posix()))
-    g2cams = g2cam.load_cams()
+    cams_json = RC.cams_for_capture(args.capture)
+    cams = DF.load_cameras(str(cams_json))
+    tm_cams = load_cameras(cams_json)
+    g2cams = g2cam.load_cams(cams_json)
     mdl = g2cam.load_led_model(g2cam.CTRL_LEFT if args.dev == 1 else g2cam.CTRL_RIGHT)
     hp = load_head_pose(args.capture / "telemetry")
     cache = BE.BlobCache(GF._frames_dir(args.capture),

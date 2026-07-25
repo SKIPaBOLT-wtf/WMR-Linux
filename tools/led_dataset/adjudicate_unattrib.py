@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent / "research"))
 import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry"))
+from matcher_failure import CAMS_JSON
 from manifest import Manifest
 import g2_geom as G
 from dump_frames import xform
@@ -41,7 +42,7 @@ def main():
     args = ap.parse_args()
 
     rows = [r for r in json.load(open(args.json)) if r["verdict"] == "UNATTRIB"]
-    cams = g2cam.load_cams()
+    cams = g2cam.load_cams(CAMS_JSON)
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
 
     splits = split_paths(args.root)

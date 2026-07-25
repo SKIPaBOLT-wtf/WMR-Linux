@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent / "research"))
 import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry"))
 from manifest import Manifest
+from replay_contract import PINNED_CAMS
 import g2_geom as G
 from dump_frames import xform   # cross-cam pose transform via the rigid inter-camera extrinsics
 # xform is head-pose-free: a pose object<-cam_j is mapped to object<-cam_i purely through the rigid
@@ -59,6 +60,10 @@ BRACKET_NS = 250_000_000  # device "present" if bracketed by commits within +-th
 FLIP_DEG = 15.0           # tilt/yaw residual above which a wrong-pose axis is dominant
 
 CTRL = {1: g2cam.CTRL_LEFT, 2: g2cam.CTRL_RIGHT}
+# Every split is a pre-provenance May-2026 capture, so the pinned config IS the capture-era
+# one. Scoring must never read the ~/.config copy the live driver rewrites at session start
+# (tools/telemetry/replay_contract.py).
+CAMS_JSON = PINNED_CAMS
 # Replay-output dirs holding each split's telemetry/candidate.bin (regenerate by running
 # offline_vio_replay with G2_REPLAY_TELEMETRY=<dir>/telemetry on the capture).
 SPLITS = {
@@ -274,7 +279,7 @@ def main():
     ap.add_argument("--json", default=None)
     ap.add_argument("--splits", nargs="*", default=list(SPLITS))
     args = ap.parse_args()
-    cams = g2cam.load_cams()
+    cams = g2cam.load_cams(CAMS_JSON)
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
     allrows = []
     for split in args.splits:

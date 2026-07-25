@@ -58,6 +58,7 @@ from headpose_anchor import (
     load_head_pose, anchor_from_capture, A_TILT_FLIP, A_YAW_FLIP, A_GOOD,
 )
 import blob_explain as BE
+import replay_contract as RC
 
 # A frame is only CORRUPT if the blob-true pose differs from the GT by MORE than the scoring
 # tolerance -- i.e. the GT would WRONGLY mis-score a blob-correct candidate. If the GT is within
@@ -162,6 +163,7 @@ def _cache_provenance(capture: Path, dev: int, witness_csv_dir: "Path | str | No
     return {
         "algorithm_version": GT_BLOBFIX_ALGORITHM_VERSION,
         "capture": str(Path(capture).resolve()),
+        "cams": str(RC.cams_for_capture(capture)),
         "device_id": int(dev),
         "device_name": DEVICE_NAMES[dev],
         "has_witness_seed": witness_dir is not None,
@@ -202,8 +204,9 @@ def build_corrupt_mask(capture: Path, dev: int,
 
     if cams is None:
         g2cam, _ = BE._lazy_imports()
-        cams = DF.load_cameras(g2cam.HMD_CAMERAS.as_posix())
-        g2cams = g2cam.load_cams()
+        cams_json = RC.cams_for_capture(capture)
+        cams = DF.load_cameras(str(cams_json))
+        g2cams = g2cam.load_cams(cams_json)
         led_model = g2cam.load_led_model(g2cam.CTRL_LEFT if dev == 1 else g2cam.CTRL_RIGHT)
     if cache is None:
         cache = BE.BlobCache(_frames_dir(capture))
@@ -387,8 +390,9 @@ def main() -> int:
     args = ap.parse_args()
     devs = (args.dev,) if args.dev else (1, 2)
     g2cam, _ = BE._lazy_imports()
-    cams = DF.load_cameras(g2cam.HMD_CAMERAS.as_posix())
-    g2cams = g2cam.load_cams()
+    cams_json = RC.cams_for_capture(args.capture)
+    cams = DF.load_cameras(str(cams_json))
+    g2cams = g2cam.load_cams(cams_json)
     cache = BE.BlobCache(_frames_dir(args.capture))
     for dev in devs:
         mdl = g2cam.load_led_model(g2cam.CTRL_LEFT if dev == 1 else g2cam.CTRL_RIGHT)

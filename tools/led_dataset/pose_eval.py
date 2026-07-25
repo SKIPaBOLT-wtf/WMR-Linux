@@ -15,6 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent / "research"))
 import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry"))
+from matcher_failure import CAMS_JSON
 from manifest import Manifest
 import g2_geom as G
 
@@ -46,7 +47,7 @@ def main():
     ap.add_argument("--good-frac", type=float, default=0.6, help="min frac of GT LEDs explained for a GOOD verdict")
     args = ap.parse_args()
     ds = Path(args.dataset); tel = Path(args.capture) / "telemetry"
-    cams = g2cam.load_cams()
+    cams = g2cam.load_cams(CAMS_JSON)
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
     gt = load_gt(ds)
     if not gt:

@@ -26,6 +26,7 @@ import numpy as np
 import detection_f1 as DF
 import blob_explain as BE
 import gt_blob_fix as GF
+import replay_contract as RC
 from headpose_anchor import load_head_pose
 from smooth_ref import build_reference
 from manifest import DEVICE_NAMES
@@ -96,8 +97,9 @@ def main():
     ref = build_reference(capdir / "telemetry", args.dev)
     hp = load_head_pose(capdir / "telemetry")
     g2cam, _ = BE._lazy_imports()
-    cams = DF.load_cameras(g2cam.HMD_CAMERAS.as_posix())
-    g2cams = g2cam.load_cams()
+    cams_json = RC.cams_for_capture(capdir)
+    cams = DF.load_cameras(str(cams_json))
+    g2cams = g2cam.load_cams(cams_json)
     mdl = g2cam.load_led_model(g2cam.CTRL_LEFT if args.dev == 1 else g2cam.CTRL_RIGHT)
     cache = BE.BlobCache(GF._frames_dir(capdir),
                          disk_cache=Path("/tmp/gtfix") / f"blobcache_{capdir.name}.npz")

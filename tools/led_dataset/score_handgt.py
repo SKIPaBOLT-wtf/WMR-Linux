@@ -11,6 +11,7 @@ Usage: score_handgt.py --root <battery>/handgt [--json out.json]
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import matcher_failure as MF  # noqa: E402
@@ -62,7 +63,7 @@ def main() -> int:
         ap.error("--compare and --comparison-csv must be supplied together")
     root = Path(args.root).resolve()
     splits = MF.split_paths(root)
-    cams = MF.g2cam.load_cams()
+    cams = MF.g2cam.load_cams(MF.CAMS_JSON)
     models = {d: MF.g2cam.load_led_model(Path(p)) for d, p in MF.CTRL.items()}
     allrows = []
     for split, replay in splits.items():

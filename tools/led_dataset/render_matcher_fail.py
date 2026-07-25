@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent / "research")); import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry")); from manifest import Manifest; import g2_geom as G
 from prep import stretch
 from dump_frames import xform, CTRL
+from matcher_failure import CAMS_JSON
 
 # capture -> (short-exp frames dir, long-exp source). long-exp is euroc mav0 (cam<c>/data/*.png) where
 # present, else the sparse e300 long-exposure pgms in the same frames dir.
@@ -111,7 +112,7 @@ def main():
     args = ap.parse_args()
     rows = [r for r in json.load(open(args.json)) if r["verdict"] in args.buckets]
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
-    cams = g2cam.load_cams(); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
+    cams = g2cam.load_cams(CAMS_JSON); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
     short = {s: short_index(c["frames"]) for s, c in CAPS.items()}
     longi = {s: long_index(c) for s, c in CAPS.items()}
     tels = {}
