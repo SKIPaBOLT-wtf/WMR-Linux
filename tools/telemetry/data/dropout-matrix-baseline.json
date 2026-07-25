@@ -12,22 +12,24 @@
    "row_objective_minima": {
     "xv1/normal/dev1": 99.87781813476523,
     "xv1/normal/dev2": 86.47423223819159,
-    "xv1/periodic-300/dev1": 0.0,
-    "xv1/periodic-300/dev2": 0.0,
-    "xv1/bursts-short/dev1": 65.01811218346582,
-    "xv1/bursts-short/dev2": 48.74584656899373,
+    "xv1/periodic-300/dev1": 14.251241691528547,
+    "xv1/periodic-300/dev2": 18.12884311982403,
+    "xv1/bursts-short/dev1": 65.05829055499507,
+    "xv1/bursts-short/dev2": 48.74564830270204,
     "xv1/bursts-long/dev1": 42.52789020611656,
     "xv1/bursts-long/dev2": 33.89043022953967,
-    "clean2/normal/dev1": 99.91236177633101,
+    "clean2/normal/dev1": 99.91368619982082,
     "clean2/normal/dev2": 100.0,
-    "clean2/periodic-300/dev1": 31.8552571058224,
-    "clean2/periodic-300/dev2": 30.751050332090983,
-    "clean2/bursts-short/dev1": 84.68322208354616,
+    "clean2/periodic-300/dev1": 31.85918224728001,
+    "clean2/periodic-300/dev2": 30.751073212750295,
+    "clean2/bursts-short/dev1": 84.68439963443456,
     "clean2/bursts-short/dev2": 84.16597615359468,
-    "clean2/bursts-long/dev1": 22.120168572431208,
-    "clean2/bursts-long/dev2": 36.28407116890732
+    "clean2/bursts-long/dev1": 22.120028689557095,
+    "clean2/bursts-long/dev2": 36.734563036140834
    },
-   "objective_geomean_min": 0.0
+   "objective_geomean_min": 47.05768140532705,
+   "source_run": "results/consolidated-20260724/final-blackout/summary.json",
+   "source_head": "6bf83434f"
   },
   {
    "profile": "realoov",
@@ -45,16 +47,18 @@
     "xv1/mask1-bursts-long/dev2": 81.81229569371457,
     "xv1/mask2-bursts-long/dev1": 81.44140716456849,
     "xv1/mask2-bursts-long/dev2": 36.932644211343714,
-    "clean2/mask1-periodic-300/dev1": 31.877745107509785,
+    "clean2/mask1-periodic-300/dev1": 32.18748135018417,
     "clean2/mask1-periodic-300/dev2": 66.15117635941371,
-    "clean2/mask2-periodic-300/dev1": 59.07192963205193,
-    "clean2/mask2-periodic-300/dev2": 30.756508640321943,
-    "clean2/mask1-bursts-long/dev1": 29.940834144499384,
+    "clean2/mask2-periodic-300/dev1": 59.06989299308098,
+    "clean2/mask2-periodic-300/dev2": 30.75659379983715,
+    "clean2/mask1-bursts-long/dev1": 29.940631555355466,
     "clean2/mask1-bursts-long/dev2": 72.09227412128307,
-    "clean2/mask2-bursts-long/dev1": 42.11957046231348,
-    "clean2/mask2-bursts-long/dev2": 36.28407116890732
+    "clean2/mask2-bursts-long/dev1": 44.567034412211996,
+    "clean2/mask2-bursts-long/dev2": 36.734563036140834
    },
-   "objective_geomean_min": 43.49343569067902
+   "objective_geomean_min": 43.707219140973194,
+   "source_run": "results/consolidated-20260724/final-realoov/summary.json",
+   "source_head": "6bf83434f"
   }
  ]
 }
