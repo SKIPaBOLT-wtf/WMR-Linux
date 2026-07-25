@@ -39,8 +39,13 @@ FLIP_DEG = 90.0
 FLIP_GAP_MS = 120.0
 
 
-def load_candidate_csv(path, col):
-    """Load offline_vio_replay CSV -> (t_ns, pos, quat, valid_mask)."""
+def load_candidate_csv(path, col, valid_only=True):
+    """Load offline_vio_replay CSV -> (t_ns, pos, quat).
+
+    valid_only drops samples the stream itself marks invalid (opt_valid / pred_tracked) -- the right
+    default for accuracy scoring, which must not charge a candidate for poses it never claimed. Pass
+    False to load the stream AS REPORTED: pred_tracked=0 still carries a finite, runaway-clamped pose
+    that the compositor renders, so a failure mode measured on what the USER SEES must include it."""
     rows = []
     with open(path, newline="") as f:
         rd = csvmod.DictReader(f)
@@ -61,7 +66,7 @@ def load_candidate_csv(path, col):
         valid = np.array([int(float(r.get("pred_tracked", 1))) != 0 for r in rows])
     # drop non-finite / non-valid candidate samples
     fin = np.isfinite(pos).all(1) & np.isfinite(quat).all(1)
-    keep = valid & fin
+    keep = (valid & fin) if valid_only else fin
     return t[keep], pos[keep], G.quat_normalize(quat[keep])
 
 

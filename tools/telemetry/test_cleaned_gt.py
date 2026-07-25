@@ -429,7 +429,7 @@ def main():
         _os.chmod(stub, stat.S_IRWXU)
         cap = io.StringIO()
         with contextlib.redirect_stderr(cap):
-            ok_run = run_replay_dual(stub, "f", "c", "t", "l", "r", out_dir)
+            ok_run = run_replay_dual(stub, "f", "c", "t", "l", "r", out_dir, "xv1")
         err = cap.getvalue()
         check("stub replay succeeds", ok_run, err)
         check("WARN line is surfaced on rc=0", "completion barrier timed out" in err, repr(err))
@@ -470,6 +470,7 @@ def main():
     pos_pred_h[100:120] = [0.8, 0.0, 0.0]  # held away, then snapping back at 120
     eps = hold_snap_episodes(t_hs, err_pred_h, err_opt, pos_pred_h)
     check("injected 500 ms hold is detected as exactly one episode", len(eps) == 1, str(eps))
+    check("a flat-error episode is classified held", eps and eps[0]["held"], str(eps))
     check("episode duration matches the injected span", eps and abs(eps[0]["duration_s"] - 0.475) < 1e-6,
           str(eps))
     check("episode reports the exit snap magnitude", eps and abs(eps[0]["exit_snap_m"] - 0.8) < 1e-9,
@@ -497,6 +498,17 @@ def main():
     eps_e = hold_snap_episodes(t_hs, err_pred_e, err_opt, pos_pred)
     check("a hold that never resolves is still counted", len(eps_e) == 1, str(eps_e))
     check("an unresolved hold is flagged unresolved", eps_e and not eps_e[0]["resolved"], str(eps_e))
+    # A re-entry glide starts a metre out and closes the distance; it must NOT read as a hold.
+    err_glide = err_opt.copy()
+    err_glide[100:130] = np.linspace(1.1, 0.5, 30)
+    eps_g = hold_snap_episodes(t_hs, err_glide, err_opt, pos_pred)
+    check("a converging re-entry glide is detected but NOT classified held",
+          len(eps_g) == 1 and not eps_g[0]["held"], str(eps_g))
+    # An episode must be contiguous in TIME: a run either side of a coast is two events, not one.
+    t_gap = t_hs.copy()
+    t_gap[110:] += 2_000_000_000  # a 2 s dropout in the middle of the injected hold
+    check("a run bridging a 2 s coast splits into two episodes",
+          len(hold_snap_episodes(t_gap, err_pred_h, err_opt, pos_pred_h)) == 2)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

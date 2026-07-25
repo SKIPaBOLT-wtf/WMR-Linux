@@ -60,6 +60,13 @@ FELT_MAX_S = 2.0
 #: Frames after an episode ends over which the exit jump is measured (a snap resolves within a
 #: couple of optical frames at 30-45 Hz).
 SNAP_LOOKAHEAD_FRAMES = 3
+#: An episode must be CONTIGUOUS IN TIME, not merely in the scored index. Scored frames exist only
+#: where optical was present, so without this a run silently bridges a multi-second coast and reports
+#: one long "hold" that is really two short ones around a dropout. The break is the fusion's own
+#: OPTICAL_FREEZE_NS: past it the filter has stopped trusting dead-reckoned position and the report is
+#: a freeze, so the two sides of the gap are different events. Measured gaps are bimodal (<=33 ms
+#: inside a run, >=1.2 s across a coast), so the split is not delicate.
+EPISODE_MAX_GAP_S = 0.5
 
 
 def _percentile(values, q):
@@ -67,7 +74,14 @@ def _percentile(values, q):
 
 
 def hold_snap_episodes(t_ns, err_pred, err_opt, pos_pred):
-    """Maximal runs where the fused report is worse than the optical it was handed by >= HOLD_GAIN_M.
+    """Maximal time-contiguous runs where the fused report is worse than the optical it was handed by
+    >= HOLD_GAIN_M.
+
+    Each episode is classified `held` or `converging`. A re-entry glide -- the deliberate ease from a
+    frozen coast position back onto a freshly re-acquired optical -- also starts a metre out, so error
+    magnitude alone cannot tell the two apart; what distinguishes them is that a glide is closing the
+    distance and a hold is not. `held` means the run made less than HOLD_GAIN_M of progress toward the
+    truth end-to-end, i.e. the report sat there. Only `held` episodes are the stuck-then-snap failure.
 
     t_ns/err_pred/err_opt/pos_pred are aligned per-scored-frame arrays (same reference frames)."""
     gain = err_pred - err_opt
@@ -80,7 +94,8 @@ def hold_snap_episodes(t_ns, err_pred, err_opt, pos_pred):
             i += 1
             continue
         j = i
-        while j + 1 < n and hot[j + 1]:
+        while (j + 1 < n and hot[j + 1] and
+               float(int(t_ns[j + 1]) - int(t_ns[j])) / 1e9 <= EPISODE_MAX_GAP_S):
             j += 1
         dur_s = float(int(t_ns[j]) - int(t_ns[i])) / 1e9
         snap_m = 0.0
@@ -94,9 +109,12 @@ def hold_snap_episodes(t_ns, err_pred, err_opt, pos_pred):
             gain_mean_m=float(np.mean(gain[i:j + 1])),
             gain_max_m=float(np.max(gain[i:j + 1])),
             pred_err_max_m=float(np.max(err_pred[i:j + 1])),
+            pred_err_start_m=float(err_pred[i]),
+            pred_err_end_m=float(err_pred[j]),
             opt_err_mean_m=float(np.mean(err_opt[i:j + 1])),
             exit_snap_m=snap_m,
             resolved=bool(j + 1 < n),
+            held=bool(err_pred[j] > err_pred[i] - HOLD_GAIN_M),
         ))
         i = j + 1
     return episodes
@@ -108,8 +126,12 @@ def score_device(telemetry_dir: Path, csv_path: Path, dev: int) -> dict | None:
     if ref is None:
         return None
 
-    # load_candidate_csv already drops non-finite and non-valid samples (pred_tracked / opt_valid).
-    t_p, pos_p, _ = load_candidate_csv(csv_path, "pred")
+    # The fused stream is loaded AS REPORTED (valid_only=False). A pred_tracked=0 frame still carries a
+    # finite, runaway-clamped pose that the compositor renders, and holding a visibly wrong pose is the
+    # failure mode being measured -- scoring only the tracked frames hides exactly the episodes where the
+    # filter had lost position, kept rendering somewhere wrong, and refused the optical that would have
+    # fixed it. The optical stream keeps valid_only: a frame with no optical is a coast, not a hold.
+    t_p, pos_p, _ = load_candidate_csv(csv_path, "pred", valid_only=False)
     t_o, pos_o, _ = load_candidate_csv(csv_path, "opt")
 
     # Score both streams on the SAME reference frames: an episode is only meaningful where the
@@ -141,17 +163,19 @@ def score_device(telemetry_dir: Path, csv_path: Path, dev: int) -> dict | None:
     p_pred = np.array([err_pred_by_ref[r][2] for r in shared])
 
     episodes = hold_snap_episodes(t_s, e_pred, e_opt, p_pred)
+    held = [e for e in episodes if e["held"]]
     scored_span_s = float(int(t_s[-1]) - int(t_s[0])) / 1e9
-    dwell_s = float(sum(e["duration_s"] for e in episodes))
-    durations = np.array([e["duration_s"] for e in episodes]) if episodes else np.array([])
-    felt = [e for e in episodes if FELT_MIN_S <= e["duration_s"] <= FELT_MAX_S]
+    dwell_s = float(sum(e["duration_s"] for e in held))
+    durations = np.array([e["duration_s"] for e in held]) if held else np.array([])
+    felt = [e for e in held if FELT_MIN_S <= e["duration_s"] <= FELT_MAX_S]
     return dict(
         device_id=dev,
         device=DEVICE_NAMES.get(dev, str(dev)),
         scored_frames=len(shared),
         scored_span_s=scored_span_s,
         hold_gain_m=HOLD_GAIN_M,
-        n_episodes=len(episodes),
+        n_held=len(held),
+        n_converging=len(episodes) - len(held),
         n_felt_band=len(felt),
         dwell_s=dwell_s,
         dwell_pct=100.0 * dwell_s / scored_span_s if scored_span_s > 0 else None,
@@ -159,8 +183,8 @@ def score_device(telemetry_dir: Path, csv_path: Path, dev: int) -> dict | None:
         duration_med_s=_percentile(durations, 50),
         duration_p95_s=_percentile(durations, 95),
         duration_max_s=float(durations.max()) if durations.size else None,
-        gain_max_m=max((e["gain_max_m"] for e in episodes), default=None),
-        exit_snap_max_m=max((e["exit_snap_m"] for e in episodes), default=None),
+        gain_max_m=max((e["gain_max_m"] for e in held), default=None),
+        exit_snap_max_m=max((e["exit_snap_m"] for e in held), default=None),
         pred_err_mean_m=float(np.mean(e_pred)),
         opt_err_mean_m=float(np.mean(e_opt)),
         episodes=episodes,
@@ -195,13 +219,15 @@ def main() -> int:
     if not results:
         print("no scoreable device", file=sys.stderr)
         return 1
+    nan = float("nan")
     for r in results:
-        print(f"dev{r['device_id']} ({r['device']}): {r['n_episodes']} hold episodes "
-              f"({r['n_felt_band']} in the {FELT_MIN_S}-{FELT_MAX_S}s felt band), "
-              f"dwell {r['dwell_s']:.3f}s = {r['dwell_pct']:.3f}% of {r['scored_span_s']:.1f}s scored; "
-              f"max dur {r['duration_max_s'] if r['duration_max_s'] is not None else float('nan'):.3f}s, "
-              f"max gain {r['gain_max_m'] if r['gain_max_m'] is not None else float('nan'):.3f}m, "
-              f"max exit snap {r['exit_snap_max_m'] if r['exit_snap_max_m'] is not None else float('nan'):.3f}m")
+        print(f"dev{r['device_id']} ({r['device']}): {r['n_held']} HELD episodes "
+              f"({r['n_felt_band']} in the {FELT_MIN_S}-{FELT_MAX_S}s felt band) "
+              f"+ {r['n_converging']} converging (re-entry glides, not holds); "
+              f"held dwell {r['dwell_s']:.3f}s = {r['dwell_pct']:.3f}% of {r['scored_span_s']:.1f}s scored; "
+              f"max dur {r['duration_max_s'] if r['duration_max_s'] is not None else nan:.3f}s, "
+              f"max gain {r['gain_max_m'] if r['gain_max_m'] is not None else nan:.3f}m, "
+              f"max exit snap {r['exit_snap_max_m'] if r['exit_snap_max_m'] is not None else nan:.3f}m")
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(results, indent=2))
