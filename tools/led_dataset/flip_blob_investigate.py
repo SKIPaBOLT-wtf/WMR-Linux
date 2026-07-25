@@ -33,17 +33,18 @@ import g2cam                                   # noqa: E402
 from manifest import Manifest                  # noqa: E402
 import g2_geom as G                            # noqa: E402
 from prep import detect_candidates, cluster_and_flag  # noqa: E402
+import matcher_failure as MF              # noqa: E402
 
 CTRL = {1: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json",
         2: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json"}
 
-CAPS = {
-    "xv1":      dict(tel="/tmp/wtfix_20260528-080421-xv-session1/telemetry",
-                     frames="/home/mrwhite0racle/g2-linux-research/captures/20260528-080421-xv-session1/frames"),
-    "clean":    dict(tel="/tmp/wtfix_20260526-175615-clean-session2/telemetry",
-                     frames="/home/mrwhite0racle/g2-linux-research/captures/20260526-175615-clean-session2/frames"),
-    "headpose": dict(tel="/tmp/wtfix_20260524-200416-headpose/telemetry",
-                     frames="/home/mrwhite0racle/g2-linux-research/captures/20260524-200416-headpose/frames"),
+#: Short-exposure frame source per split. The telemetry side is resolved from an explicit replay
+#: root (matcher_failure.split_paths), never a baked path into a scratch dir a past run happened to
+#: leave behind.
+CAP_FRAMES = {
+    "xv1": "/home/mrwhite0racle/g2-linux-research/captures/20260528-080421-xv-session1/frames",
+    "clean": "/home/mrwhite0racle/g2-linux-research/captures/20260526-175615-clean-session2/frames",
+    "headpose": "/home/mrwhite0racle/g2-linux-research/captures/20260524-200416-headpose/frames",
 }
 
 # Matcher gate (pose_metrics.c): led_radius_px ellipse + a blob-too-large cull (>4x radius). We use a
@@ -102,6 +103,9 @@ def gnn_match(proj_uv, visible, blobs_xy, gate=GATE_PX):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--telemetry-root", type=Path, required=True,
+                    help="replay root containing xv1/, clean2/ and headpose/ (same layout as "
+                         "matcher_failure.py --telemetry-root)")
     ap.add_argument("--adj", default=str(HERE / "dataset/matcher_failures/adjudication.json"))
     ap.add_argument("--out", default="/tmp/flip_blob_investigation.json")
     ap.add_argument("--gate", type=float, default=GATE_PX)
@@ -110,7 +114,8 @@ def main():
     adj = json.load(open(args.adj))
     flips = [a for a in adj if a.get("adj") == "FLIP" and a.get("genuine")]
 
-    cams = g2cam.load_cams()
+    splits = MF.split_paths(args.telemetry_root)
+    cams = g2cam.load_cams(MF.CAMS_JSON)
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
 
     # per-capture telemetry caches
@@ -118,14 +123,14 @@ def main():
 
     def load_cand(split):
         if split not in cand_cache:
-            tel = Path(CAPS[split]["tel"])
+            tel = splits[split] / "telemetry"
             m = Manifest.load(tel)
             cand_cache[split] = G.load_stream(tel, m, "candidate")
         return cand_cache[split]
 
     def load_fidx(split):
         if split not in frame_idx_cache:
-            frame_idx_cache[split] = short_index(CAPS[split]["frames"])
+            frame_idx_cache[split] = short_index(CAP_FRAMES[split])
         return frame_idx_cache[split]
 
     results = []

@@ -6,19 +6,26 @@ long-exp SLAM panel), and emit metadata for the PDF. Attribution-robust (cross-c
   3 NOT-MATCHED     : no committed pose for this controller (explained <0.05); controller present, few/no LEDs
 """
 from __future__ import annotations
-import glob, json, sys
+import argparse, glob, json, sys
 from pathlib import Path
 import numpy as np, cv2
 sys.path.insert(0, str(Path(__file__).parent / "research")); import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry")); from manifest import Manifest; import g2_geom as G
 from prep import stretch, frame_index
+import matcher_failure as MF
 
 CTRL = {1: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json",
         2: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json"}
-DS = Path("dataset/xv1"); OUT = Path("dataset/pdf_samples")
+_ap = argparse.ArgumentParser(description=__doc__)
+_ap.add_argument("--telemetry", type=Path, required=True,
+                 help="replay telemetry dir for the xv1 split (the dir holding manifest.json)")
+_args = _ap.parse_args()
+
+_HERE = Path(__file__).resolve().parent
+DS = _HERE / "dataset/xv1"; OUT = _HERE / "dataset/pdf_samples"
 CAP = Path("/home/mrwhite0racle/g2-linux-research/captures/20260528-080421-xv-session1")
-FRAMES = CAP / "frames"; SLAM = CAP / "euroc_20260528080506/mav0"; TELDIR = Path("/tmp/all3_tel/telemetry")
-cams = g2cam.load_cams(); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
+FRAMES = CAP / "frames"; SLAM = CAP / "euroc_20260528080506/mav0"; TELDIR = _args.telemetry
+cams = g2cam.load_cams(MF.CAMS_JSON); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
 
 def load_gt():
     out = {}

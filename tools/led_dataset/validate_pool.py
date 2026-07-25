@@ -7,7 +7,7 @@ from pathlib import Path
 from collections import Counter
 import numpy as np
 
-POOL = Path("dataset/pool")
+POOL = Path(__file__).resolve().parent / "dataset/pool"
 REQ = {"tag", "controller_visible", "n_controllers", "degenerate", "led_ids", "clutter_ids",
        "ambiguous_ids", "confidence", "notes"}
 errors = []; rows = []

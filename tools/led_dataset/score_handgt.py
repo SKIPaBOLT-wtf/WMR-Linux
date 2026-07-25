@@ -67,7 +67,7 @@ def main() -> int:
     models = {d: MF.g2cam.load_led_model(Path(p)) for d, p in MF.CTRL.items()}
     allrows = []
     for split, replay in splits.items():
-        fb = MF.frame_blob_map([Path("dataset/pool") / split])
+        fb = MF.frame_blob_map([MF.POOL / split])
         rows = MF.classify_split(split, replay, cams, models, fb)
         allrows += rows
         MF.report(split, rows)

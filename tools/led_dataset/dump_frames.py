@@ -16,6 +16,7 @@ import numpy as np, cv2
 sys.path.insert(0, str(Path(__file__).parent / "research")); import g2cam
 sys.path.insert(0, str(Path(__file__).parent / "../telemetry")); from manifest import Manifest; import g2_geom as G
 from prep import stretch, frame_index
+from replay_contract import cams_for_capture
 
 CTRL = {1: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json",
         2: "/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json"}
@@ -66,7 +67,7 @@ def main():
         return v[:h]
     ds = Path(args.dataset); out = ds.parent / args.out
     import shutil; shutil.rmtree(out, ignore_errors=True); out.mkdir()
-    cams = g2cam.load_cams(); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
+    cams = g2cam.load_cams(cams_for_capture(args.capture)); models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
     gt = load_gt(ds); tel = Path(args.capture) / "telemetry"; m = Manifest.load(tel); cand = G.load_stream(tel, m, "candidate")
     fidx = frame_index(Path(args.frames))
 

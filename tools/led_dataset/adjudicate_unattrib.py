@@ -36,7 +36,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=Path, required=True,
                     help="replay battery root containing xv1/, clean2/, and headpose/")
-    ap.add_argument("--json", default="/tmp/curfix_catalog2.json")
+    ap.add_argument("--json", required=True,
+                    help="classified-frame catalog from `matcher_failure.py --telemetry-root ROOT --json PATH`")
     ap.add_argument("--radius", type=float, default=40.0, help="base accept radius, px")
     ap.add_argument("--out", default=None, help="write per-frame verdicts here")
     args = ap.parse_args()

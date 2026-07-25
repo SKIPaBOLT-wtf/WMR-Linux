@@ -64,6 +64,9 @@ CTRL = {1: g2cam.CTRL_LEFT, 2: g2cam.CTRL_RIGHT}
 # one. Scoring must never read the ~/.config copy the live driver rewrites at session start
 # (tools/telemetry/replay_contract.py).
 CAMS_JSON = PINNED_CAMS
+#: The hand-annotation pool ships with this directory; anchoring it to the module means every
+#: consumer resolves it from any cwd instead of only from tools/led_dataset.
+POOL = Path(__file__).resolve().parent / "dataset/pool"
 # Replay-output dirs holding each split's telemetry/candidate.bin (regenerate by running
 # offline_vio_replay with G2_REPLAY_TELEMETRY=<dir>/telemetry on the capture).
 SPLITS = {
@@ -126,7 +129,7 @@ def classify_split(split, cap, cams, models, frame_nblobs):
     win_lo = int(sel["t_mono_ns"].astype(np.int64).min()) if len(sel) else 0
     win_hi = int(sel["t_mono_ns"].astype(np.int64).max()) if len(sel) else 0
 
-    gt = load_gt(Path("dataset/pool") / split)
+    gt = load_gt(POOL / split)
     rows = []
     for tag, g in sorted(gt.items()):
         cam_id, ts, n_true = g["cam"], g["ts"], g["n_true"]
@@ -284,7 +287,7 @@ def main():
     allrows = []
     for split in args.splits:
         cap = args.telemetry_root / SPLITS[split]
-        fb = frame_blob_map([Path("dataset/pool") / split])
+        fb = frame_blob_map([POOL / split])
         rows = classify_split(split, cap, cams, models, fb)
         allrows += rows
         report(split, rows)

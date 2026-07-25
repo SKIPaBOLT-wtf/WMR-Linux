@@ -114,13 +114,15 @@ def main() -> int:
     baseline = {
         "schema_version": 1,
         "profiles": [{
-            "name": "synthetic",
+            "profile": "synthetic",
             "row_objective_minima": {"synthetic/normal/dev1": good["objective_score"]},
             "objective_geomean_min": objective["score_geomean"],
         }],
     }
     gate = evaluate_gate([good], objective, baseline)
     check("pinned row passes", gate["passed"], str(gate["failures"]))
+    check("the matched profile is named in the verdict", gate["profile"] == "synthetic",
+          repr(gate["profile"]))
 
     worse = complete_row()
     worse["pred_position_rmse_cm"] = 2.0

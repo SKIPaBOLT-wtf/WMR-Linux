@@ -2,11 +2,17 @@
 """Assemble the annotation pool from the per-capture select.py outputs: exclude already-annotated frames,
 prioritize the failure-rich HARD(<=3 cand) + MED(4-6) bins (the hardest samples), keep a sampled EASY/RICH
 baseline for precision, and emit one frame list per capture for prep.py."""
-import glob, json, re
+import argparse, glob, json, re
 from pathlib import Path
 import numpy as np
 
-DS = Path("dataset")
+_ap = argparse.ArgumentParser(description=__doc__)
+_ap.add_argument("--select-dir", type=Path, required=True,
+                 help="dir holding one sel_<capture>.txt per capture, as written by "
+                      "`select.py <capture> <n> > sel_<capture>.txt`")
+_args = _ap.parse_args()
+
+DS = Path(__file__).resolve().parent / "dataset"
 SEL = {"20260528-080421-xv-session1": "xv1", "20260526-175615-clean": "clean2", "20260524-200416-headpose": "headpose"}
 EASY_FRAC = 0.30   # keep this fraction of easy/rich (GOOD-frame baseline); take all hard+med
 rng = np.random.default_rng(0)
@@ -25,7 +31,7 @@ tot = {}
 for cap, split in SEL.items():
     done = annotated_ts(split)
     rows = []
-    for line in open(f"/tmp/sel_{cap}.txt"):
+    for line in open(_args.select_dir / f"sel_{cap}.txt"):
         m = re.match(r"(\d+)\s+(\d+)\s+#\s*n=(\d+)", line)
         if not m: continue
         cam, ts, n = int(m.group(1)), int(m.group(2)), int(m.group(3))

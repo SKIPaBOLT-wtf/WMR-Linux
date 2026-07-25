@@ -871,7 +871,7 @@ def evaluate_gate(
             )
     return {
         "passed": not failures,
-        "profile": profile.get("name") if profile else None,
+        "profile": profile.get("profile") if profile else None,
         "failures": failures,
     }
 

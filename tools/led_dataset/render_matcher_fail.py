@@ -105,7 +105,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--telemetry-root", type=Path, required=True,
                     help="replay root containing xv1, clean2, and headpose outputs")
-    ap.add_argument("--json", default="/tmp/matcher_failures_xform.json")
+    ap.add_argument("--json", required=True,
+                    help="classified-frame catalog from `matcher_failure.py --telemetry-root ROOT --json PATH`")
     ap.add_argument("--buckets", nargs="*", default=["UNATTRIB", "WRONG", "NO_COMMIT"])
     ap.add_argument("--out", default="dataset/matcher_failures")
     ap.add_argument("--eps", type=float, default=5.0)

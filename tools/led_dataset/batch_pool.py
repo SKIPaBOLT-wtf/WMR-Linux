@@ -2,11 +2,10 @@
 """Batch the prepped annotation pool for the fleet. Priority: HARD (few-LED, controller-present) first,
 then MED, then degenerate (clutter-storm), then easy/rich. Balanced round-robin across captures so each
 batch is mixed. Emits /tmp/batches/batch_NN.json = {batch_id, frames:[{split, tag, png, candidates}]}."""
-import glob, json
+import glob, json, shutil
 from pathlib import Path
 
-POOL = Path("dataset/pool"); OUT = Path("/tmp/batches"); BATCH = 25
-import shutil; shutil.rmtree(OUT, ignore_errors=True); OUT.mkdir(parents=True)
+POOL = Path(__file__).resolve().parent / "dataset/pool"; OUT = Path("/tmp/batches"); BATCH = 25
 
 def bin_of(c):
     nclu = c["flags"]["n_cluster"]; degen = c["flags"]["degenerate"]
@@ -32,6 +31,10 @@ for prio in (0, 1, 2, 3):
         for s in ("xv1", "clean", "headpose"):
             if bysplit[s]: order.append(bysplit[s].pop(0))
 batches = [order[i:i + BATCH] for i in range(0, len(order), BATCH)]
+# Wipe only once the new batching has actually been computed: doing it up front destroyed the
+# previous run's batches even when the pool was empty or unreadable.
+shutil.rmtree(OUT, ignore_errors=True)
+OUT.mkdir(parents=True)
 for i, b in enumerate(batches):
     json.dump({"batch_id": i, "frames": b}, open(OUT / f"batch_{i:02d}.json", "w"), indent=1)
 from collections import Counter
