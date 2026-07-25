@@ -33,8 +33,8 @@ NO_COMMIT MODE: CLUTTER_FLOOD (frame blob count >> n_true => over-detection drow
 NO_HYPOTHESIS (matcher generated nothing for this device near this time).
 
 Usage:
-  matcher_failure.py            # all three splits vs their wtfix replays
-  matcher_failure.py --json out.json
+  matcher_failure.py --telemetry-root results/redo-20260723/current-handgt-a
+  matcher_failure.py --telemetry-root <root> --json out.json
 """
 from __future__ import annotations
 import argparse, glob, json, sys, re
@@ -62,10 +62,17 @@ CTRL = {1: g2cam.CTRL_LEFT, 2: g2cam.CTRL_RIGHT}
 # Replay-output dirs holding each split's telemetry/candidate.bin (regenerate by running
 # offline_vio_replay with G2_REPLAY_TELEMETRY=<dir>/telemetry on the capture).
 SPLITS = {
-    "xv1":      "/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/xv1",
-    "clean":    "/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/clean2",
-    "headpose": "/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/headpose",
+    "xv1": "xv1",
+    "clean": "clean2",
+    "headpose": "headpose",
 }
+
+
+def split_paths(root) -> dict:
+    """Resolve SPLITS against an explicit replay root -> {split: Path}. The single place that knows
+    a split's directory name, so no tool carries a baked-in path to a dated result dir."""
+    base = Path(root)
+    return {split: base / subdir for split, subdir in SPLITS.items()}
 
 
 def load_gt(ds_dir: Path):
@@ -262,6 +269,8 @@ def frame_blob_map(tag_dirs):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--telemetry-root", type=Path, required=True,
+                    help="replay root containing xv1, clean2, and headpose outputs")
     ap.add_argument("--json", default=None)
     ap.add_argument("--splits", nargs="*", default=list(SPLITS))
     args = ap.parse_args()
@@ -269,7 +278,7 @@ def main():
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
     allrows = []
     for split in args.splits:
-        cap = SPLITS[split]
+        cap = args.telemetry_root / SPLITS[split]
         fb = frame_blob_map([Path("dataset/pool") / split])
         rows = classify_split(split, cap, cams, models, fb)
         allrows += rows

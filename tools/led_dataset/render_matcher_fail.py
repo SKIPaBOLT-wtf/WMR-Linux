@@ -13,8 +13,10 @@ marks (green X)? If red sits on green -> tracked-on-another-view (GOOD-equivalen
 mirrored twin of green -> mirror-flip. If red is elsewhere/garbage -> position-wrong / clutter. If there is
 no red and green LEDs are clearly real -> genuine no-commit.
 
-  ~/miniconda3/envs/g2vr/bin/python render_matcher_fail.py --json /tmp/matcher_failures_xform.json \
-      --buckets UNATTRIB WRONG NO_COMMIT --out dataset/matcher_failures
+  ~/miniconda3/envs/g2vr/bin/python render_matcher_fail.py \
+      --telemetry-root results/redo-20260723/current-handgt-a \
+      --json /tmp/matcher_failures_xform.json --buckets UNATTRIB WRONG NO_COMMIT \
+      --out dataset/matcher_failures
 """
 from __future__ import annotations
 import argparse, glob, json, sys
@@ -28,13 +30,13 @@ from dump_frames import xform, CTRL
 # capture -> (short-exp frames dir, long-exp source). long-exp is euroc mav0 (cam<c>/data/*.png) where
 # present, else the sparse e300 long-exposure pgms in the same frames dir.
 CAPS = {
-    "xv1":      dict(tel="/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/xv1",
+    "xv1":      dict(replay="xv1",
                      frames="/home/mrwhite0racle/g2-linux-research/captures/20260528-080421-xv-session1/frames",
                      slam="/home/mrwhite0racle/g2-linux-research/captures/20260528-080421-xv-session1/euroc_20260528080506/mav0"),
-    "clean":    dict(tel="/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/clean2",
-                     frames="/home/mrwhite0racle/g2-linux-research/captures/20260526-175615-clean-session2/frames",
+    "clean":    dict(replay="clean2",
+                     frames="/home/mrwhite0racle/g2-linux-research/captures/20260526-175615-clean/frames",
                      slam=""),
-    "headpose": dict(tel="/home/mrwhite0racle/g2-linux-research/results/h6-rmodel-20260612/v2/handgt/headpose",
+    "headpose": dict(replay="headpose",
                      frames="/home/mrwhite0racle/g2-linux-research/captures/20260524-200416-headpose/frames",
                      slam="/home/mrwhite0racle/g2-linux-research/captures/20260524-200416-headpose/euroc_20260524200507/mav0"),
 }
@@ -100,6 +102,8 @@ def committed_uv(cams, models, r, gt_cam):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--telemetry-root", type=Path, required=True,
+                    help="replay root containing xv1, clean2, and headpose outputs")
     ap.add_argument("--json", default="/tmp/matcher_failures_xform.json")
     ap.add_argument("--buckets", nargs="*", default=["UNATTRIB", "WRONG", "NO_COMMIT"])
     ap.add_argument("--out", default="dataset/matcher_failures")
@@ -130,7 +134,7 @@ def main():
         red_uv = np.zeros((0, 2)); red_all = np.zeros((0, 2))
         if r["dev"] is not None:
             if split not in tels:
-                tel = Path(CAPS[split]["tel"]) / "telemetry"
+                tel = args.telemetry_root / CAPS[split]["replay"] / "telemetry"
                 m = Manifest.load(tel)
                 tels[split] = G.load_stream(tel, m, "candidate")
             cand = tels[split]

@@ -14,7 +14,8 @@ distance to the annotated LED-cluster centroid.
                      the controller the annotator saw is NOT held by any commit
                      (missed-equivalent; or only the partner was committed).
 
-  ~/miniconda3/envs/g2vr/bin/python adjudicate_unattrib.py --json /tmp/curfix_catalog2.json
+  ~/miniconda3/envs/g2vr/bin/python adjudicate_unattrib.py --root results/<run>/handgt \
+      --json /tmp/curfix_catalog2.json
 """
 from __future__ import annotations
 import argparse, json, sys
@@ -27,11 +28,13 @@ sys.path.insert(0, str(Path(__file__).parent / "../telemetry"))
 from manifest import Manifest
 import g2_geom as G
 from dump_frames import xform
-from matcher_failure import SPLITS, CTRL, MATCH_NS, load_gt, nearest_idx
+from matcher_failure import CTRL, MATCH_NS, load_gt, nearest_idx, split_paths
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--root", type=Path, required=True,
+                    help="replay battery root containing xv1/, clean2/, and headpose/")
     ap.add_argument("--json", default="/tmp/curfix_catalog2.json")
     ap.add_argument("--radius", type=float, default=40.0, help="base accept radius, px")
     ap.add_argument("--out", default=None, help="write per-frame verdicts here")
@@ -41,15 +44,16 @@ def main():
     cams = g2cam.load_cams()
     models = {d: g2cam.load_led_model(Path(p)) for d, p in CTRL.items()}
 
+    splits = split_paths(args.root)
     sels = {}
-    for split, cap in SPLITS.items():
+    for split, cap in splits.items():
         tel = Path(cap) / "telemetry"
         m = Manifest.load(tel)
         cand = G.load_stream(tel, m, "candidate")
         sel = cand[cand["selected"] == 1]
         sels[split] = {d: sel[sel["device_id"] == d] for d in (1, 2)}
 
-    gts = {split: load_gt(Path("dataset/pool") / split) for split in SPLITS}
+    gts = {split: load_gt(Path("dataset/pool") / split) for split in splits}
 
     out_rows = []
     counts = {"TRACKED_AT_GT": 0, "TRACKED_ELSEWHERE": 0, "NO_NEAR_COMMIT": 0}
