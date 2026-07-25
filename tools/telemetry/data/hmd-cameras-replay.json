@@ -2,6 +2,7 @@
   "format": "g2-constellation-cameras",
   "version": 1,
   "cam_count": 4,
+  "ctrl_gain": 16,
   "cameras": [
     {
       "index": 0,
