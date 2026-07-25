@@ -24,6 +24,7 @@ ROOT = Path("/home/mrwhite0racle/g2-linux-research")
 DEFAULT_CAMS = Path(__file__).resolve().parent / "data/hmd-cameras-replay.json"
 DEFAULT_LEFT = Path("/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json")
 DEFAULT_RIGHT = Path("/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json")
+DEFAULT_BASELINE = Path(__file__).resolve().parent / "data/dropout-matrix-baseline.json"
 
 
 CAPTURES = {
@@ -753,6 +754,10 @@ def build_provenance(args: argparse.Namespace, captures: list[str], regimes: lis
             "git": git_info,
         },
         "scorer": scorer_hashes(),
+        "gate_baseline": {
+            "path": str(args.baseline),
+            "sha256": _sha256(args.baseline),
+        },
         "gt_blobfix_caches": {
             cap: {p.name: _sha256(p)
                   for p in sorted((CAPTURES[cap]["reference"] / "telemetry").glob("gt_blobfix_*.npz"))}
@@ -783,6 +788,84 @@ def summarize_objective(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "loss_mean": sum(losses) / len(losses) if losses else None,
         "hard_fail_rows": len(hard_fail_rows),
     }
+
+
+#: Objective-score tolerance for the non-regression floors, in score points on the 0-100 scale.
+#: The harness is bit-deterministic (a re-run reproduces a reference exactly), so a replicate needs
+#: no tolerance at all. This is not for replicates: it is the resolution below which a CHANGED
+#: trajectory is not a quality claim. objective_score is 100*exp(-loss/weight), so 0.01 points is a
+#: ~1e-4 relative move of the aggregate -- reached by p95 order statistics shifting tens of
+#: micrometres, which is far under this tracker's own noise on a 32-LED constellation at ~0.5 m.
+#: Without it the floors demand bit-identical trajectories forever and reject strict improvements:
+#: recall-reform-20260724 raised opt_recall and lowered RMSE and p95 on clean2/bursts-long/dev1 while
+#: a forced-drop p95 moved +44 um, dropping the composite 0.00014 and "failing". Behaviour is still
+#: gated exactly: identity hard failures are absolute, and a real regression is orders of magnitude
+#: larger than this.
+OBJECTIVE_SCORE_TOLERANCE = 0.01
+
+
+def row_identity(row: dict[str, Any]) -> str:
+    return f"{row['capture']}/{row['regime']}/dev{int(row['device'])}"
+
+
+def evaluate_gate(
+    rows: list[dict[str, Any]],
+    objective: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    """Enforce row hard failures and non-regression against an exact matrix profile."""
+    identities = {row_identity(row): row for row in rows}
+    if len(identities) != len(rows):
+        return {"passed": False, "failures": ["duplicate matrix row identity"]}
+    expected_keyset = set(identities)
+    profile = next(
+        (
+            item
+            for item in baseline.get("profiles", [])
+            if set(item.get("row_objective_minima", {})) == expected_keyset
+        ),
+        None,
+    )
+    failures = []
+    for identity, row in sorted(identities.items()):
+        hard_fail = str(row.get("objective_hard_fail") or "")
+        if hard_fail:
+            failures.append(f"{identity}: objective hard fail: {hard_fail}")
+    if profile is None:
+        failures.append(
+            "no pinned baseline profile for rows: " + ",".join(sorted(expected_keyset))
+        )
+    else:
+        for identity, minimum in sorted(profile["row_objective_minima"].items()):
+            actual = as_float(identities[identity].get("objective_score"))
+            floor = as_float(minimum)
+            if actual is None or floor is None or actual + OBJECTIVE_SCORE_TOLERANCE < floor:
+                failures.append(
+                    f"{identity}: objective_score {actual!r} below pinned {floor!r}"
+                )
+        actual_geomean = as_float(objective.get("score_geomean"))
+        pinned_geomean = as_float(profile.get("objective_geomean_min"))
+        if (
+            actual_geomean is None
+            or pinned_geomean is None
+            or actual_geomean + OBJECTIVE_SCORE_TOLERANCE < pinned_geomean
+        ):
+            failures.append(
+                f"matrix objective geomean {actual_geomean!r} below pinned "
+                f"{pinned_geomean!r}"
+            )
+    return {
+        "passed": not failures,
+        "profile": profile.get("name") if profile else None,
+        "failures": failures,
+    }
+
+
+def load_gate_baseline(path: Path) -> dict[str, Any]:
+    baseline = json.loads(path.read_text())
+    if baseline.get("schema_version") != 1 or not isinstance(baseline.get("profiles"), list):
+        raise ValueError(f"unsupported dropout baseline schema: {path}")
+    return baseline
 
 
 def print_rows(rows: list[dict[str, Any]]) -> None:
@@ -822,7 +905,11 @@ def print_rows(rows: list[dict[str, Any]]) -> None:
             print(f"  HARD FAIL {row['capture']}/{row['regime']}/dev{row['device']}: {row['objective_hard_fail']}")
 
 
-def report(rows: list[dict[str, Any]], objective: dict[str, Any]) -> int:
+def report(
+    rows: list[dict[str, Any]],
+    objective: dict[str, Any],
+    gate: dict[str, Any],
+) -> int:
     print_rows(rows)
     coverages = [c for c in (as_float(row.get("scoreable_pct_total")) for row in rows) if c is not None]
     coverage = (f" | scoreable coverage min={min(coverages):.1f}% max={max(coverages):.1f}% of frames"
@@ -839,6 +926,12 @@ def report(rows: list[dict[str, Any]], objective: dict[str, Any]) -> int:
         print(f"\nMEASUREMENT NON-COMPLIANT rows: {len(noncompliant)} — these numbers are NOT publishable",
               file=sys.stderr)
         return 2
+    if not gate["passed"]:
+        print("\nMATRIX GATE FAILED:", file=sys.stderr)
+        for failure in gate["failures"]:
+            print(f"  {failure}", file=sys.stderr)
+        return 3
+    print(f"matrix gate: PASS ({gate['profile']})")
     return 0
 
 
@@ -853,6 +946,7 @@ def rescore(args: argparse.Namespace) -> int:
         return 2
     rows = flatten(results)
     objective = summarize_objective(rows)
+    gate = evaluate_gate(rows, objective, load_gate_baseline(args.baseline))
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_path = runroot / f"summary-rescored-{stamp}.json"
     out_path.write_text(json.dumps({
@@ -861,8 +955,9 @@ def rescore(args: argparse.Namespace) -> int:
         "scorer": scorer_hashes(),
         "rows": rows,
         "objective": objective,
+        "gate": gate,
     }, indent=2))
-    code = report(rows, objective)
+    code = report(rows, objective, gate)
     print(f"\nwrote {out_path}")
     return code
 
@@ -875,6 +970,8 @@ def main() -> int:
     parser.add_argument("--cams", type=Path, default=DEFAULT_CAMS)
     parser.add_argument("--ctrl-left", type=Path, default=DEFAULT_LEFT)
     parser.add_argument("--ctrl-right", type=Path, default=DEFAULT_RIGHT)
+    parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE,
+                        help="pinned corrected-harness matrix objective baseline")
     parser.add_argument("--capture", action="append", choices=sorted(CAPTURES), help="default: xv1 and clean2")
     parser.add_argument("--regime", action="append", choices=sorted(REGIMES), help="default compact OOV matrix")
     parser.add_argument("--reference-qc", choices=("none", "corrupt", "confirmed"), default="confirmed")
@@ -884,6 +981,9 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.rescore is not None:
+        if not args.baseline.exists():
+            parser.error(f"--baseline file not found: {args.baseline}")
+        args.baseline = args.baseline.resolve()
         return rescore(args)
     if args.binary is None:
         parser.error("--binary is required (no default — pin the binary under test explicitly)")
@@ -892,7 +992,7 @@ def main() -> int:
     args.binary = args.binary.resolve()
     # Resolve against the invoker's CWD now: replays run with a per-cell cwd, which would
     # silently re-anchor relative paths (the H2-era dev2refit probe mis-run class).
-    for name in ("cams", "ctrl_left", "ctrl_right"):
+    for name in ("cams", "ctrl_left", "ctrl_right", "baseline"):
         path = getattr(args, name)
         if not path.exists():
             parser.error(f"--{name.replace('_', '-')} file not found: {path}")
@@ -921,15 +1021,17 @@ def main() -> int:
 
     rows = flatten(all_results)
     objective = summarize_objective(rows)
+    gate = evaluate_gate(rows, objective, load_gate_baseline(args.baseline))
     provenance["loadavg_end"] = os.getloadavg()
     (runroot / "summary.json").write_text(json.dumps(
-        {"provenance": provenance, "results": all_results, "rows": rows, "objective": objective}, indent=2))
+        {"provenance": provenance, "results": all_results, "rows": rows,
+         "objective": objective, "gate": gate}, indent=2))
     with (runroot / "summary.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()) if rows else [])
         if rows:
             writer.writeheader()
             writer.writerows(rows)
-    code = report(rows, objective)
+    code = report(rows, objective, gate)
     print(f"\nwrote {runroot}")
     return code
 

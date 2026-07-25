@@ -1,0 +1,60 @@
+{
+ "schema_version": 1,
+ "description": "Canonical per-row objective floors for the dropout matrix gate, derived from the pinned corrected-harness profile references in this directory. One file, because evaluate_gate() selects the profile whose row identities match the run.",
+ "profiles": [
+  {
+   "profile": "blackout",
+   "source_starting_head": "a26aa2eddf133a05f1f8dcd12304f2686e83cc67",
+   "production_fix": "pose_metrics full-output initialization",
+   "offline_vio_replay_sha256": "d5995a6070fa3e7dbd3f8f490b951a326531bea16233eb400b46f83e7706ba62",
+   "normalized_rows_sha256": "23e11a1fc665ee9d52d16c8e33283083662d6301ddd12d67878282627f65450f",
+   "reference_file": "dropout_matrix_blackout_reference.json",
+   "row_objective_minima": {
+    "xv1/normal/dev1": 99.87781813476523,
+    "xv1/normal/dev2": 86.47423223819159,
+    "xv1/periodic-300/dev1": 0.0,
+    "xv1/periodic-300/dev2": 0.0,
+    "xv1/bursts-short/dev1": 65.01811218346582,
+    "xv1/bursts-short/dev2": 48.74584656899373,
+    "xv1/bursts-long/dev1": 42.52789020611656,
+    "xv1/bursts-long/dev2": 33.89043022953967,
+    "clean2/normal/dev1": 99.91236177633101,
+    "clean2/normal/dev2": 100.0,
+    "clean2/periodic-300/dev1": 31.8552571058224,
+    "clean2/periodic-300/dev2": 30.751050332090983,
+    "clean2/bursts-short/dev1": 84.68322208354616,
+    "clean2/bursts-short/dev2": 84.16597615359468,
+    "clean2/bursts-long/dev1": 22.120168572431208,
+    "clean2/bursts-long/dev2": 36.28407116890732
+   },
+   "objective_geomean_min": 0.0
+  },
+  {
+   "profile": "realoov",
+   "source_starting_head": "a26aa2eddf133a05f1f8dcd12304f2686e83cc67",
+   "production_fix": "pose_metrics full-output initialization",
+   "offline_vio_replay_sha256": "d5995a6070fa3e7dbd3f8f490b951a326531bea16233eb400b46f83e7706ba62",
+   "normalized_rows_sha256": "7298dae6d1242ee65fcfd44d7cc1b6685223857094127ed7bedc0acfa13c6dbb",
+   "reference_file": "dropout_matrix_realoov_reference.json",
+   "row_objective_minima": {
+    "xv1/mask1-periodic-300/dev1": 14.732653998915737,
+    "xv1/mask1-periodic-300/dev2": 67.5328097444463,
+    "xv1/mask2-periodic-300/dev1": 58.57089116784315,
+    "xv1/mask2-periodic-300/dev2": 20.010396266522452,
+    "xv1/mask1-bursts-long/dev1": 45.21431377123804,
+    "xv1/mask1-bursts-long/dev2": 81.81229569371457,
+    "xv1/mask2-bursts-long/dev1": 81.44140716456849,
+    "xv1/mask2-bursts-long/dev2": 36.932644211343714,
+    "clean2/mask1-periodic-300/dev1": 31.877745107509785,
+    "clean2/mask1-periodic-300/dev2": 66.15117635941371,
+    "clean2/mask2-periodic-300/dev1": 59.07192963205193,
+    "clean2/mask2-periodic-300/dev2": 30.756508640321943,
+    "clean2/mask1-bursts-long/dev1": 29.940834144499384,
+    "clean2/mask1-bursts-long/dev2": 72.09227412128307,
+    "clean2/mask2-bursts-long/dev1": 42.11957046231348,
+    "clean2/mask2-bursts-long/dev2": 36.28407116890732
+   },
+   "objective_geomean_min": 43.49343569067902
+  }
+ ]
+}
