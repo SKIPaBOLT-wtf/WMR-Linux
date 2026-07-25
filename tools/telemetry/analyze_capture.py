@@ -45,8 +45,9 @@ from detection_f1 import (  # noqa: E402
     load_cameras, load_led_model, in_fov_per_cam,
     pose_attempt_to_xrworld_device, _interp_quat_pos, _interp_reference_to_times,
     _load_head_pose, P_YZ_FLIP_R,
-    DEFAULT_CAMS, DEFAULT_CTRL_LEFT, DEFAULT_CTRL_RIGHT,
+    DEFAULT_CTRL_LEFT, DEFAULT_CTRL_RIGHT,
 )
+from replay_contract import cams_for_capture  # noqa: E402
 
 
 SPEED_BINS_M_S = [(0.0, 0.1, "static"), (0.1, 0.5, "slow"), (0.5, 2.0, "fast"), (2.0, 1e9, "vfast")]
@@ -417,7 +418,9 @@ def _json_safe(obj):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("capture")
-    ap.add_argument("--cams", default=DEFAULT_CAMS)
+    ap.add_argument("--cams", default=None,
+                    help="override the camera config (default: the capture's own provenance "
+                         "snapshot, else the pinned pre-provenance config)")
     ap.add_argument("--ctrl-left", default=DEFAULT_CTRL_LEFT)
     ap.add_argument("--ctrl-right", default=DEFAULT_CTRL_RIGHT)
     ap.add_argument("--match-ms", type=float, default=25.0)
@@ -427,7 +430,7 @@ def main():
 
     capture = Path(args.capture)
     telem = capture / "telemetry"
-    cams = load_cameras(args.cams)
+    cams = load_cameras(args.cams or cams_for_capture(capture))
     print(f"Loaded {len(cams)} cameras\n")
 
     hp = _load_head_pose(telem)

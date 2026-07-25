@@ -36,6 +36,7 @@ import headpose_anchor as HA
 import blob_explain as BE
 import detection_f1 as DF
 import g2_geom as G
+import replay_contract as RC
 from detection_f1 import load_cameras, load_led_model, R_to_quat, quat_to_R
 
 CAPTURES = {
@@ -43,7 +44,7 @@ CAPTURES = {
     "clean2": Path("/home/mrwhite0racle/g2-linux-research/captures/20260526-175615-clean-session2"),
 }
 CSV_ROOT = Path("/home/mrwhite0racle/g2-linux-research/docs/sota-research/roadmap/a1-artifacts")
-CAMS_JSON = str(__import__("pathlib").Path(__file__).resolve().parent / "data/hmd-cameras-replay.json")  # pinned: live driver rewrites the ~/.config copy
+CAMS_JSON = str(RC.PINNED_CAMS)
 CTRL = {
     1: str(Path.home() / ".config/monado/wmr/controller_A85K1111630014L.json"),
     2: str(Path.home() / ".config/monado/wmr/controller_A85K5091930012R.json"),
@@ -236,8 +237,8 @@ def analyze_cell(cap_name: str, dev: int, cams, g2cams, blob_cache_dir, n_arbite
 def main():
     n_arbiter = int(sys.argv[1]) if len(sys.argv) > 1 else 25
     g2cam, _ = BE._lazy_imports()
-    cams = DF.load_cameras(g2cam.HMD_CAMERAS.as_posix())   # detection_f1 cameras (grid + world<-cam chain)
-    g2cams = g2cam.load_cams()                              # g2cam camera dict (projection), keyed by cam id
+    cams = DF.load_cameras(CAMS_JSON)   # detection_f1 cameras (grid + world<-cam chain)
+    g2cams = g2cam.load_cams(CAMS_JSON)  # g2cam camera dict (projection), keyed by cam id
     blob_cache_dir = Path("/tmp/diag_coast_cache")
     blob_cache_dir.mkdir(exist_ok=True)
     out = {}

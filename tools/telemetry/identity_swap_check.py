@@ -19,7 +19,7 @@ Gate: ZERO SWAP rows across the whole capture => exit 0, else exit 1. With
 knife-edge fixture windows); whole-capture counts are always reported.
 
 Usage:
-  identity_swap_check.py REPLAY_DIR --capture CAPTURE_DIR --cams CAMS_JSON \
+  identity_swap_check.py REPLAY_DIR --capture CAPTURE_DIR [--cams CAMS_JSON] \
       [--ctrl-left J] [--ctrl-right J] [--own-cm 5] [--other-cm 5] [--far-own-cm 8] [--out JSON]
   identity_swap_check.py REPLAY_DIR --regression --bin offline_vio_replay
 
@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +43,7 @@ import blob_explain as BE  # noqa: E402
 import detection_f1 as DF  # noqa: E402
 import g2_geom as G  # noqa: E402
 import gt_blob_fix as GF  # noqa: E402
+import replay_contract as RC  # noqa: E402
 from manifest import DEVICE_NAMES, Manifest  # noqa: E402
 from smooth_ref import build_reference  # noqa: E402
 
@@ -57,14 +57,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REGRESSION_FIXTURE = {
     "capture": ROOT / "captures/20260528-080421-xv-session1",
     "frames": ROOT / "captures/20260528-080421-xv-session1-framebin/frames",
-    "cams": Path(__file__).resolve().parent / "data/hmd-cameras-replay.json",
     "drop_env": {
         "G2_REPLAY_DROP_OPTICAL_PERIOD_MS": "1000",
         "G2_REPLAY_DROP_OPTICAL_DURATION_MS": "300",
-        # The matrix references and every pinned floor were produced with this calibration; with it
-        # unset the harness loads NO IMU calibration and the run is a different system entirely
-        # (34 vs 36 swap accepts on this very cell at 708388d75).
-        "G2_REPLAY_IMU_CAL_DIR": str(ROOT / "captures/20260723-112531-comprehensive-stack/provenance"),
     },
     "mutual_window": (60.9, 62.1),
 }
@@ -83,9 +78,10 @@ def run_fixture_replay(binary: Path, out_dir: Path, ctrl_left: str, ctrl_right: 
     replay_out = out_dir / "out"
     for path in (telemetry, replay_out):
         path.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, **fixture["drop_env"], "G2_REPLAY_TELEMETRY": str(telemetry)}
+    env = RC.replay_env(fixture["drop_env"], {"G2_REPLAY_TELEMETRY": str(telemetry)},
+                        imu_cal_dir=RC.imu_cal_dir_for_capture(fixture["capture"]))
     proc = subprocess.run(
-        [str(binary), str(fixture["frames"]), str(fixture["cams"]),
+        [str(binary), str(fixture["frames"]), str(RC.cams_for_capture(fixture["capture"])),
          str(fixture["capture"] / "telemetry"), ctrl_left, ctrl_right, str(replay_out)],
         env=env, capture_output=True, text=True)
     for line in (proc.stderr or "").splitlines():
@@ -154,13 +150,13 @@ def classify_device(replay_telem: Path, cap_telem: Path, dev: int, cams, refs, h
     return counts, recs, poses
 
 
-def render_swaps(out_dir: Path, capdir: Path, dev: int, recs, poses, cams, scale: int = 2):
+def render_swaps(out_dir: Path, capdir: Path, dev: int, recs, poses, cams, cams_json, scale: int = 2):
     """Panel per SWAP accept: the accepted pose projected with THIS device's LED model against the
     blobs it actually explained, plus both devices' cleaned-GT projections. A steal shows as the red
     accepted projection sitting on the magenta partner reference instead of the green own reference."""
     import cv2
     g2cam, _prep = BE._lazy_imports()
-    g2cams = g2cam.load_cams()
+    g2cams = g2cam.load_cams(cams_json)
     mdl = {1: g2cam.load_led_model(g2cam.CTRL_LEFT), 2: g2cam.load_led_model(g2cam.CTRL_RIGHT)}
     cache = BE.BlobCache(GF._frames_dir(capdir))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -250,7 +246,7 @@ def main() -> int:
                     help="run the pinned REGRESSION_FIXTURE replay with --bin and gate on its windows")
     ap.add_argument("--bin", dest="binary", help="offline_vio_replay harness (required by --regression)")
     ap.add_argument("--capture", help="reference capture dir (cleaned-GT + head pose)")
-    ap.add_argument("--cams", help="hmd-cameras.json (capture provenance)")
+    ap.add_argument("--cams", help="hmd-cameras.json (default: the capture's own provenance snapshot)")
     ap.add_argument("--ctrl-left", default=DF.DEFAULT_CTRL_LEFT)
     ap.add_argument("--ctrl-right", default=DF.DEFAULT_CTRL_RIGHT)
     ap.add_argument("--own-cm", type=float, default=5.0)
@@ -268,12 +264,13 @@ def main() -> int:
         if args.binary is None:
             ap.error("--regression needs --bin (the offline_vio_replay harness under test)")
         args.capture = args.capture or str(REGRESSION_FIXTURE["capture"])
-        args.cams = args.cams or str(REGRESSION_FIXTURE["cams"])
+        args.cams = args.cams or str(RC.cams_for_capture(REGRESSION_FIXTURE["capture"]))
         code = run_fixture_replay(Path(args.binary), Path(args.replay), args.ctrl_left, args.ctrl_right)
         if code != 0:
             return code
-    elif args.capture is None or args.cams is None:
-        ap.error("--capture and --cams are required without --regression")
+    elif args.capture is None:
+        ap.error("--capture is required without --regression")
+    args.cams = args.cams or str(RC.cams_for_capture(args.capture))
     gate_windows = None
     if args.gate_windows:
         gate_windows = [tuple(float(x) for x in w.split("-")) for w in args.gate_windows.split(",")]
@@ -305,7 +302,7 @@ def main() -> int:
                                               args.own_cm, args.other_cm, args.far_own_cm, t0,
                                               collect_poses=args.render is not None)
         if args.render:
-            n = render_swaps(Path(args.render), cap, dev, recs, poses, cams)
+            n = render_swaps(Path(args.render), cap, dev, recs, poses, cams, args.cams)
             print(f"  rendered {n} panel(s) -> {args.render}")
         all_recs[dev] = recs
         eps = episodes(recs)

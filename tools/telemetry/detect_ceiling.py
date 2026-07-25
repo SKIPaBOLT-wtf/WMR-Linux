@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manifest import Manifest  # noqa: E402
 import g2_geom as G  # noqa: E402
 import detection_f1 as DF  # noqa: E402
+import replay_contract as RC  # noqa: E402
 
 POS_VALID = 1 << 1
 POS_TRACKED = 1 << 5
@@ -304,7 +305,7 @@ def main() -> int:
 
     capture = args.capture
     telem = capture / "telemetry" if (capture / "telemetry" / "manifest.json").is_file() else capture
-    cams_json = args.cams or _default_provenance(capture, "hmd-cameras.json", DF.DEFAULT_CAMS)
+    cams_json = args.cams or str(RC.cams_for_capture(capture))
     ctrl_l = args.ctrl_left or _default_provenance(capture, "controller_*L.json", DF.DEFAULT_CTRL_LEFT)
     ctrl_r = args.ctrl_right or _default_provenance(capture, "controller_*R.json", DF.DEFAULT_CTRL_RIGHT)
     cams = DF.load_cameras(cams_json)

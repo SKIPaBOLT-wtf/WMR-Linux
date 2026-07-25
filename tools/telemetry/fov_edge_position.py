@@ -57,8 +57,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manifest import DEVICE_NAMES  # noqa: E402
 from tracking_metrics import build_reference_grid, load_csv_stream, _nearest_indices  # noqa: E402
+from replay_contract import PINNED_CAMS  # noqa: E402
 from detection_f1 import (  # noqa: E402
-    DEFAULT_CAMS,
     DEFAULT_CTRL_LEFT,
     DEFAULT_CTRL_RIGHT,
     Camera,
@@ -312,7 +312,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cell", action="append", required=True,
                     help="tag:CAPTURE_DIR:CSV_DIR (repeatable). CSV_DIR holds dev1.csv/dev2.csv")
-    ap.add_argument("--cams", default=DEFAULT_CAMS)
+    # One config for every cell: the fields this tool reads (intrinsics, distortion, P_imu_cam,
+    # roi) are identical across the capture-era snapshots, and the cells span captures.
+    ap.add_argument("--cams", default=str(PINNED_CAMS))
     ap.add_argument("--ctrl-left", default=DEFAULT_CTRL_LEFT)
     ap.add_argument("--ctrl-right", default=DEFAULT_CTRL_RIGHT)
     ap.add_argument("--pos-tol-cm", type=float, default=POS_TOL_CM)

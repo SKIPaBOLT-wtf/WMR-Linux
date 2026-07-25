@@ -16,8 +16,8 @@ fused prediction (`pred`) of the SAME current binary. Pass --baseline-bin to add
 second (e.g. previously-built) binary against --candidate-bin.
 
 Usage:
-  run_ab.py --capture DIR [--capture DIR ...] [--bin PATH]
-            [--baseline-bin PATH --candidate-bin PATH]
+  run_ab.py --capture DIR [--capture DIR ...] --bin PATH
+  run_ab.py --capture DIR [--capture DIR ...] --baseline-bin PATH --candidate-bin PATH
             [--cams JSON] [--ctrl-left JSON] [--ctrl-right JSON]
             [--cols opt,pred] [--out DIR]
 
@@ -41,9 +41,8 @@ from smooth_ref import build_reference
 from mse_eval import load_candidate_csv, compute_metrics, csv_row_count
 import headpose_anchor as HA
 from manifest import DEVICE_NAMES
+from replay_contract import cams_for_capture, imu_cal_dir_for_capture, replay_env
 
-DEFAULT_BIN = "/tmp/offline_vio_replay_pinned"
-DEFAULT_CAMS = str(__import__("pathlib").Path(__file__).resolve().parent / "data/hmd-cameras-replay.json")  # pinned: live driver rewrites the ~/.config copy
 PGM_RE = re.compile(r"^cam(?P<cam>\d+)_t(?P<ts>\d+)_e(?P<exp>\d+)_s(?P<seq>\d+)_n(?P<n>\d+)\.pgm$")
 
 
@@ -150,7 +149,7 @@ def _frames_dir(capture: Path) -> str:
     raise FileNotFoundError(f"no frames/ or euroc*/mav0 frame source in {capture}")
 
 
-def run_replay_dual(binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir) -> bool:
+def run_replay_dual(binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir, capture) -> bool:
     """Invoke the dual-controller harness once; both controllers run on the same tracker
     instance so the multi-device code paths (predictive-ROI per-device gate, blob labelling
     across devices, per-device pose attempts) all exercise. Produces out_dir/dev{1,2}.csv.
@@ -160,7 +159,8 @@ def run_replay_dual(binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir)
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     cmd = [binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       env=replay_env(imu_cal_dir=imu_cal_dir_for_capture(capture)))
     if r.returncode != 0:
         sys.stderr.write(f"replay FAILED: {r.stderr.strip()[:400]}\n")
         return False
@@ -244,10 +244,14 @@ def print_table(rows):
 def main() -> int:
     ap = argparse.ArgumentParser(description="one-command A/B of the G2 controller tracker")
     ap.add_argument("--capture", action="append", required=True, help="capture dir (repeatable)")
-    ap.add_argument("--bin", default=DEFAULT_BIN, help="harness binary (single-binary mode)")
+    ap.add_argument("--bin", help="harness binary, single-binary mode (REQUIRED unless "
+                                  "--baseline-bin/--candidate-bin are given; no default so the "
+                                  "binary under test is always an explicit, pinnable choice)")
     ap.add_argument("--baseline-bin", help="A/B: baseline harness binary")
     ap.add_argument("--candidate-bin", help="A/B: candidate harness binary")
-    ap.add_argument("--cams", default=DEFAULT_CAMS)
+    ap.add_argument("--cams", default=None,
+                    help="override the camera config (default: each capture's own provenance "
+                         "snapshot, else the pinned pre-provenance config)")
     ap.add_argument("--ctrl-left")
     ap.add_argument("--ctrl-right")
     ap.add_argument("--cols", default="opt,pred")
@@ -265,8 +269,14 @@ def main() -> int:
     # binary set: single (one binary, opt-vs-pred) or A/B (two binaries).
     if args.baseline_bin and args.candidate_bin:
         binaries = [("base", args.baseline_bin), ("cand", args.candidate_bin)]
-    else:
+    elif args.bin:
         binaries = [("", args.bin)]
+    else:
+        ap.error("pass --bin, or both --baseline-bin and --candidate-bin")
+    for _, binary in binaries:
+        if not Path(binary).is_file():
+            ap.error(f"harness binary not found: {binary} — build it with "
+                     f"`ninja -C <worktree>/build-cmake offline_vio_replay`")
 
     rows = []
     for cap in args.capture:
@@ -274,11 +284,12 @@ def main() -> int:
         telem = capture / "telemetry"
         frames = _frames_dir(capture)
         cap_tag = capture.name
+        cams = str(args.cams or cams_for_capture(capture))
         for btag, binary in binaries:
             # Dual-controller replay: harness exercises the multi-device tracker code paths
             # (predictive-ROI per-device gate, cross-device blob labelling) in one invocation.
             run_dir = str(out / f"{cap_tag}_{btag or 'cur'}")
-            if not run_replay_dual(binary, frames, args.cams, str(telem), left, right, run_dir):
+            if not run_replay_dual(binary, frames, cams, str(telem), left, right, run_dir, capture):
                 continue
             for dev in (1, 2):
                 csv_path = str(Path(run_dir) / f"dev{dev}.csv")

@@ -49,8 +49,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manifest import Manifest, DEVICE_NAMES  # noqa: E402
 from smooth_ref import build_reference  # noqa: E402
 import g2_geom as G  # noqa: E402
+from replay_contract import cams_for_capture  # noqa: E402
 
-DEFAULT_CAMS = str(__import__("pathlib").Path(__file__).resolve().parent / "data/hmd-cameras-replay.json")  # pinned: live driver rewrites the ~/.config copy
 DEFAULT_CTRL_LEFT = "/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json"
 DEFAULT_CTRL_RIGHT = "/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json"
 LED_ANGLE_DEG = 82.0
@@ -625,7 +625,9 @@ def main():
     ap.add_argument("--mse-pos-cm", type=float, default=5.0, help="max position error for correctness (cm)")
     ap.add_argument("--mse-ori-deg", type=float, default=15.0, help="max orientation error for correctness (deg)")
     ap.add_argument("--min-leds", type=int, default=3, help="min visible LEDs per cam to count as 'in FOV'")
-    ap.add_argument("--cams", default=DEFAULT_CAMS)
+    ap.add_argument("--cams", default=None,
+                    help="override the camera config (default: the capture's own provenance "
+                         "snapshot, else the pinned pre-provenance config)")
     ap.add_argument("--ctrl-left", default=DEFAULT_CTRL_LEFT)
     ap.add_argument("--ctrl-right", default=DEFAULT_CTRL_RIGHT)
     ap.add_argument("--out", default=None)
@@ -635,6 +637,7 @@ def main():
 
     capture = Path(args.capture)
     cand_telem_dir = capture / "telemetry"
+    args.cams = args.cams or str(cams_for_capture(capture))
     cams = load_cameras(args.cams)
     if args.reference:
         ref_capture = Path(args.reference)

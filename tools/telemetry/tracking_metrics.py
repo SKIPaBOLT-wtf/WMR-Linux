@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manifest import DEVICE_NAMES, Manifest  # noqa: E402
 from smooth_ref import build_reference  # noqa: E402
 import g2_geom as G  # noqa: E402
+from replay_contract import cams_for_capture  # noqa: E402
 from detection_f1 import (  # noqa: E402
-    DEFAULT_CAMS,
     DEFAULT_CTRL_LEFT,
     DEFAULT_CTRL_RIGHT,
     R_to_quat,
@@ -1835,7 +1835,9 @@ def main() -> int:
     parser.add_argument("reference_capture", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--candidate-name", default="candidate")
-    parser.add_argument("--cams", default=DEFAULT_CAMS)
+    parser.add_argument("--cams", default=None,
+                        help="override the camera config (default: the reference capture's own "
+                             "provenance snapshot, else the pinned pre-provenance config)")
     parser.add_argument("--ctrl-left", default=DEFAULT_CTRL_LEFT)
     parser.add_argument("--ctrl-right", default=DEFAULT_CTRL_RIGHT)
     parser.add_argument("--match-ms", type=float, default=25.0)
@@ -1851,7 +1853,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
-    cams = load_cameras(args.cams)
+    cams = load_cameras(args.cams or cams_for_capture(args.reference_capture))
     results = []
     grids: dict[int, ReferenceGrid] = {}
     pred_streams: dict[int, CandidateStream | None] = {}

@@ -5,12 +5,13 @@ This is the reusable version of the ad hoc acceptance folders:
   * canonical captures: xv1 and clean2
   * modes: frame cadence and render90
   * artifacts: replay CSVs, tracking_metrics JSON, live_health JSON/text
-  * gates: current must match or beat g2-golden quality and not lose runtime
+  * gates: current must match or beat the golden binary's quality and not lose runtime
 
-The default golden binary is the audit-harness worktree: tracker code is at
-g2-golden, while the replay harness has metric-only instrumentation such as
-G2_REPLAY_RENDER_HZ. That is the right benchmark for render/user-feel metrics:
-do not compare a non-render-capable golden binary against render90.
+Both binaries are explicit, pinnable arguments — there is no default, because a default
+outlives the worktree it names and a benchmark against a silently-substituted binary is
+worse than no benchmark. The golden binary must carry the replay harness's metric-only
+instrumentation (G2_REPLAY_RENDER_HZ): do not compare a non-render-capable golden binary
+against render90.
 """
 from __future__ import annotations
 
@@ -27,13 +28,12 @@ from pathlib import Path
 from typing import Any
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replay_contract import cams_for_capture, imu_cal_dir_for_capture, replay_env  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
-# Pinned capture-era config: the live driver rewrites the ~/.config copy (see dropout_matrix.py).
-DEFAULT_CAMS = Path(__file__).resolve().parent / "data/hmd-cameras-replay.json"
 DEFAULT_LEFT = Path.home() / ".config/monado/wmr/controller_A85K1111630014L.json"
 DEFAULT_RIGHT = Path.home() / ".config/monado/wmr/controller_A85K5091930012R.json"
-DEFAULT_GOLDEN_BIN = ROOT / "worktrees/g2-golden-audit-harness/build-cmake/tests/offline_vio_replay"
-DEFAULT_CURRENT_BIN = ROOT / "worktrees/g2-budgeted-recovery/build-cmake/tests/offline_vio_replay"
 
 
 CAPTURES = {
@@ -102,14 +102,9 @@ def _run_checked(cmd: list[str], env: dict[str, str], cwd: Path, stdout: Path, s
     return elapsed
 
 
-def _clean_replay_env(mode: str, render_hz: float) -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key.startswith("G2_REPLAY_"):
-            env.pop(key, None)
-    if mode.startswith("render"):
-        env["G2_REPLAY_RENDER_HZ"] = str(render_hz)
-    return env
+def _replay_env(capture_name: str, mode: str, render_hz: float) -> dict[str, str]:
+    settings = {"G2_REPLAY_RENDER_HZ": str(render_hz)} if mode.startswith("render") else {}
+    return replay_env(settings, imu_cal_dir=imu_cal_dir_for_capture(CAPTURES[capture_name]["reference"]))
 
 
 def _stat_median(values: list[float]) -> float:
@@ -160,7 +155,7 @@ def _run_one(args: argparse.Namespace,
         cmd = [
             str(binary),
             str(cap["frames"]),
-            str(args.cams),
+            str(args.cams or cams_for_capture(cap["reference"])),
             str(cap["telemetry"]),
             str(args.ctrl_left),
             str(args.ctrl_right),
@@ -168,7 +163,7 @@ def _run_one(args: argparse.Namespace,
         ]
         elapsed = _run_checked(
             cmd,
-            _clean_replay_env(mode, args.render_hz),
+            _replay_env(capture_name, mode, args.render_hz),
             binary.parents[1],
             rep_dir / "replay.stdout",
             rep_dir / "replay.stderr",
@@ -417,9 +412,14 @@ def _print_summary(comparisons: list[dict[str, Any]], failures: list[str], runro
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--golden-bin", type=Path, default=DEFAULT_GOLDEN_BIN)
-    ap.add_argument("--current-bin", type=Path, default=DEFAULT_CURRENT_BIN)
-    ap.add_argument("--cams", type=Path, default=DEFAULT_CAMS)
+    ap.add_argument("--golden-bin", type=Path, required=True,
+                    help="reference offline_vio_replay binary (REQUIRED; no default so the "
+                         "benchmark is always an explicit, pinnable choice)")
+    ap.add_argument("--current-bin", type=Path, required=True,
+                    help="offline_vio_replay binary under test (REQUIRED)")
+    ap.add_argument("--cams", type=Path, default=None,
+                    help="override the camera config for every cell (default: each capture's own "
+                         "provenance snapshot, else the pinned pre-provenance config)")
     ap.add_argument("--ctrl-left", type=Path, default=DEFAULT_LEFT)
     ap.add_argument("--ctrl-right", type=Path, default=DEFAULT_RIGHT)
     ap.add_argument("--capture", action="append", choices=sorted(CAPTURES), help="default: xv1 and clean2")
@@ -437,7 +437,7 @@ def main() -> int:
     if args.repeats < 1:
         ap.error("--repeats must be >= 1")
     for path in (args.golden_bin, args.current_bin, args.cams, args.ctrl_left, args.ctrl_right):
-        if not path.is_file():
+        if path is not None and not path.is_file():
             ap.error(f"missing required file: {path}")
 
     captures = args.capture or ["xv1", "clean2"]

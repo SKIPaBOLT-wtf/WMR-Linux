@@ -47,12 +47,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from run_ab import (
-        DEFAULT_CAMS,
         _find_controller_jsons,
         _frames_dir,
         run_replay_dual,
         score_run,
     )
+    from replay_contract import cams_for_capture
     from mse_eval import reentry_accuracy_from_csv, reentry_snap_m_from_csv
     from manifest import DEVICE_NAMES
 except ImportError as e:
@@ -167,7 +167,7 @@ def measure(capture, binary, cams, left, right, out_dir, columns):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     run_dir = out / "regression_dual"
-    if not run_replay_dual(binary, frames, cams, str(telem), left, right, str(run_dir)):
+    if not run_replay_dual(binary, frames, cams, str(telem), left, right, str(run_dir), Path(capture)):
         return None
 
     result = {}
@@ -278,7 +278,9 @@ def main() -> int:
     ap.add_argument("--capture", default=DEFAULT_CAPTURE)
     ap.add_argument("--bin", default=DEFAULT_BIN)
     ap.add_argument("--baseline", default=DEFAULT_BASELINE)
-    ap.add_argument("--cams", default=DEFAULT_CAMS)
+    ap.add_argument("--cams", default=None,
+                    help="override the camera config (default: the capture's own provenance "
+                         "snapshot, else the pinned pre-provenance config)")
     ap.add_argument("--ctrl-left")
     ap.add_argument("--ctrl-right")
     ap.add_argument("--tol-pct", type=float, default=2.0, help="abs %% a flip/branch/anchor metric may rise")
@@ -303,7 +305,8 @@ def main() -> int:
         print(f"SKIP: could not resolve controller jsons (pass --ctrl-left/--ctrl-right)")
         return 77
 
-    measured = measure(args.capture, args.bin, args.cams, left, right, args.out, columns)
+    cams = args.cams or str(cams_for_capture(args.capture))
+    measured = measure(args.capture, args.bin, cams, left, right, args.out, columns)
     if measured is None:
         sys.stderr.write("ERROR: replay/scoring failed; cannot evaluate the guardrail\n")
         return 2

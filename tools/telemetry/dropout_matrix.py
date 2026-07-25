@@ -16,12 +16,15 @@ from pathlib import Path
 from typing import Any
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replay_contract import (  # noqa: E402
+    cams_ctrl_gain,
+    cams_for_capture,
+    imu_cal_dir_for_capture,
+    replay_env,
+)
+
 ROOT = Path("/home/mrwhite0racle/g2-linux-research")
-# PINNED replay camera config. The live driver REWRITES ~/.config/monado/wmr/hmd-cameras.json at
-# session start (2026-06-11: a live session flipped blob_detect_threshold 24->16 mid-evening and
-# silently shifted every subsequent replay's tracker behavior). Replays must consume capture-era
-# provenance, never a live-mutable file.
-DEFAULT_CAMS = Path(__file__).resolve().parent / "data/hmd-cameras-replay.json"
 DEFAULT_LEFT = Path("/home/mrwhite0racle/.config/monado/wmr/controller_A85K1111630014L.json")
 DEFAULT_RIGHT = Path("/home/mrwhite0racle/.config/monado/wmr/controller_A85K5091930012R.json")
 DEFAULT_BASELINE = Path(__file__).resolve().parent / "data/dropout-matrix-baseline.json"
@@ -98,6 +101,11 @@ REGIMES = {
         "G2_REPLAY_DROP_DEVICE": "2",
     },
 }
+
+
+def capture_cams(args: argparse.Namespace, capture_name: str) -> Path:
+    """The camera config for one cell: an explicit --cams wins, else the capture's own."""
+    return args.cams or cams_for_capture(CAPTURES[capture_name]["reference"])
 
 
 def regime_drop_target(regime_name: str) -> int:
@@ -491,20 +499,15 @@ def run_one(args: argparse.Namespace, capture_name: str, regime_name: str, runro
     out.mkdir(parents=True, exist_ok=True)
     replay_out.mkdir(parents=True, exist_ok=True)
 
-    env = os.environ.copy()
-    for key in list(env.keys()):
-        if (key.startswith("G2_REPLAY_DROP_") or
-                key in ("G2_REPLAY_TELEMETRY", "G2_REPLAY_LED_MASK_FILE")):
-            env.pop(key, None)
-    env.update(regime)
-    env["G2_REPLAY_TELEMETRY"] = str(out / "telemetry")
+    settings: dict[str, str] = {**regime, "G2_REPLAY_TELEMETRY": str(out / "telemetry")}
     target = regime_drop_target(regime_name)
     if target:
         mask = cap["reference"] / f"led_mask_dev{target}.csv"
         if not mask.exists():
             raise RuntimeError(f"{capture_name}/{regime_name}: missing {mask} — "
                                f"generate it with tools/telemetry/make_led_mask.py")
-        env["G2_REPLAY_LED_MASK_FILE"] = str(mask)
+        settings["G2_REPLAY_LED_MASK_FILE"] = str(mask)
+    env = replay_env(settings, imu_cal_dir=imu_cal_dir_for_capture(cap["reference"]))
 
     replay_cmd = [
         "/usr/bin/time",
@@ -513,7 +516,7 @@ def run_one(args: argparse.Namespace, capture_name: str, regime_name: str, runro
         str(out / "time.txt"),
         str(args.binary),
         str(cap["frames"]),
-        str(args.cams),
+        str(capture_cams(args, capture_name)),
         str(cap["telemetry"]),
         str(args.ctrl_left),
         str(args.ctrl_right),
@@ -763,7 +766,19 @@ def build_provenance(args: argparse.Namespace, captures: list[str], regimes: lis
                   for p in sorted((CAPTURES[cap]["reference"] / "telemetry").glob("gt_blobfix_*.npz"))}
             for cap in captures
         },
-        "imu_cal_dir": os.environ.get("G2_REPLAY_IMU_CAL_DIR"),
+        # The replay contract, per capture: which camera config the cell was handed, the
+        # commanded gain that config replays at (an absent key means the gain-16 calibration
+        # point, so recording the resolved value is what makes a mis-scaled run visible), and
+        # the IMU calibration seeded in. All three are chosen by replay_contract, never
+        # inherited from the caller's shell.
+        "replay_contract": {
+            cap: {
+                "cams": str(capture_cams(args, cap)),
+                "ctrl_gain": cams_ctrl_gain(capture_cams(args, cap)),
+                "imu_cal_dir": str(imu_cal_dir_for_capture(CAPTURES[cap]["reference"])),
+            }
+            for cap in captures
+        },
         "captures": captures,
         "regimes": regimes,
         "reference_qc": args.reference_qc,
@@ -967,7 +982,9 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, default=None,
                         help="offline_vio_replay binary under test (REQUIRED; no default so the "
                              "binary is always an explicit, pinnable choice)")
-    parser.add_argument("--cams", type=Path, default=DEFAULT_CAMS)
+    parser.add_argument("--cams", type=Path, default=None,
+                        help="override the camera config for every cell (default: each capture's own "
+                             "provenance snapshot, else the pinned pre-provenance config)")
     parser.add_argument("--ctrl-left", type=Path, default=DEFAULT_LEFT)
     parser.add_argument("--ctrl-right", type=Path, default=DEFAULT_RIGHT)
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE,
@@ -994,6 +1011,8 @@ def main() -> int:
     # silently re-anchor relative paths (the H2-era dev2refit probe mis-run class).
     for name in ("cams", "ctrl_left", "ctrl_right", "baseline"):
         path = getattr(args, name)
+        if path is None:
+            continue
         if not path.exists():
             parser.error(f"--{name.replace('_', '-')} file not found: {path}")
         setattr(args, name, path.resolve())
