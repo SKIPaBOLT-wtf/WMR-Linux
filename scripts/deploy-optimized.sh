@@ -53,14 +53,24 @@ SUITES="tests_kalman_fusion|tests_constellation_pnp|tests_g2_telemetry"
 
 hdr() { printf '\n== %s ==\n' "$1"; }
 
+# The harness's whole configuration surface is G2_REPLAY_*, so inheriting any of it would make the
+# byte-identity gate below depend on the shell this script was launched from. Build the environment
+# instead, taking the calibration from the one place that owns it (stdlib-only, no analysis env).
+IMU_CAL=$(python3 -c "import sys; sys.path.insert(0, '$RESEARCH/tools/telemetry'); \
+import replay_contract; print(replay_contract.PINNED_IMU_CAL_DIR)")
+REPLAY_UNSET=()
+while IFS= read -r name; do REPLAY_UNSET+=(-u "$name"); done \
+    < <(compgen -e | grep '^G2_REPLAY_' || true)
+
 replay() { # replay <binary> <workload:xv1|band2> <outdir>
     local bin=$1 wl=$2 out=$3
     mkdir -p "$out"
+    local -a run=(env ${REPLAY_UNSET[@]+"${REPLAY_UNSET[@]}"} "G2_REPLAY_IMU_CAL_DIR=$IMU_CAL")
     if [ "$wl" = xv1 ]; then
-        "$bin" "$XV1_FRAMES" "$CAMS" "$XV1_TELEM" "$CTL_L" "$CTL_R" "$out" \
+        "${run[@]}" "$bin" "$XV1_FRAMES" "$CAMS" "$XV1_TELEM" "$CTL_L" "$CTL_R" "$out" \
             > "$out.log" 2>&1
     else
-        "$bin" "$B2_FRAMES" "$CAMS" "$B2_CAPTURE/telemetry" "$CTL_L" "$CTL_R" "$out" \
+        "${run[@]}" "$bin" "$B2_FRAMES" "$CAMS" "$B2_CAPTURE/telemetry" "$CTL_L" "$CTL_R" "$out" \
             > "$out.log" 2>&1
     fi
 }
