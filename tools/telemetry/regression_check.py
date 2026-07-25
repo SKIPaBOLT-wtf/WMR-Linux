@@ -61,9 +61,14 @@ except ImportError as e:
 
 # The faithful capture this guardrail is calibrated against (the in-headset capture used for tuning).
 DEFAULT_CAPTURE = os.path.expanduser("~/g2-linux-research/captures/20260524-200416-headpose")
-# The harness the cmake build produces (the same binary HEAD's baseline was scored with).
-DEFAULT_BIN = str(Path(__file__).resolve().parents[2] / "src/monado-thaytan/build-cmake/tests/offline_vio_replay")
-DEFAULT_BASELINE = str(Path(__file__).resolve().parents[2] / "src/monado-thaytan/tests/regression_baseline.json")
+# The live work front. `src/monado-thaytan` is the dormant integration checkout, whose baseline still
+# carries the pre-corrected-harness bars (dev1/opt flip-rate 9.209 % vs the live 0.0, wrong-branch
+# 19.226 % vs 5.0, fly-max 1.093 m vs 0.139) — defaulting there made a direct run validate against
+# bars two orders of magnitude too loose. CTest was unaffected because CMake passes --baseline
+# explicitly; a hand invocation was not.
+DEFAULT_WORKTREE = Path(__file__).resolve().parents[2] / "worktrees/g2-sota-stack"
+DEFAULT_BIN = str(DEFAULT_WORKTREE / "build-cmake/tests/offline_vio_replay")
+DEFAULT_BASELINE = str(DEFAULT_WORKTREE / "tests/regression_baseline.json")
 
 # A reported metric. key = JSON/score key; label = table header; bad = the regressing direction ("up"
 # => higher is worse, "down" => lower is worse); cols = which scored columns it applies to; tol =
