@@ -453,6 +453,51 @@ def main():
     check("wrong-branch beyond the absolute tolerance still FAILS (3.0 -> 5.5)", not ok,
           str({r[2]: r[6] for r in rows}))
 
+
+    print("[28] holdsnap: the hold-then-snap episode detector")
+    from holdsnap import hold_snap_episodes, HOLD_GAIN_M
+    n = 200
+    t_hs = (np.arange(n) * 25_000_000).astype(np.int64)  # 40 Hz optical cadence
+    # Clean run: the fused report tracks the optical it is handed, both a few mm off GT.
+    err_opt = np.full(n, 0.01)
+    err_pred = np.full(n, 0.015)
+    pos_pred = np.zeros((n, 3))
+    check("clean run yields no episodes", hold_snap_episodes(t_hs, err_pred, err_opt, pos_pred) == [])
+    # Inject a hold: 20 frames (500 ms) where the report is 0.8 m off while optical is 1 cm off.
+    err_pred_h = err_pred.copy()
+    err_pred_h[100:120] = 0.8
+    pos_pred_h = pos_pred.copy()
+    pos_pred_h[100:120] = [0.8, 0.0, 0.0]  # held away, then snapping back at 120
+    eps = hold_snap_episodes(t_hs, err_pred_h, err_opt, pos_pred_h)
+    check("injected 500 ms hold is detected as exactly one episode", len(eps) == 1, str(eps))
+    check("episode duration matches the injected span", eps and abs(eps[0]["duration_s"] - 0.475) < 1e-6,
+          str(eps))
+    check("episode reports the exit snap magnitude", eps and abs(eps[0]["exit_snap_m"] - 0.8) < 1e-9,
+          str(eps))
+    check("episode is marked resolved when frames follow", eps and eps[0]["resolved"], str(eps))
+    # A hold that is real but SUB-SLACK cannot have been caused by the jump gate -> not an episode.
+    err_pred_s = err_pred.copy()
+    err_pred_s[100:120] = HOLD_GAIN_M * 0.9
+    check("a sub-slack disagreement is not an episode",
+          hold_snap_episodes(t_hs, err_pred_s, err_opt, pos_pred) == [])
+    # The filter being wrong is NOT enough: when the optical it was handed is equally wrong, the
+    # front-end is the culprit and the gate is blameless -- the metric must stay silent.
+    check("pred and opt wrong TOGETHER is not an episode",
+          hold_snap_episodes(t_hs, err_pred_h, np.where(err_pred_h > 0.1, 0.8, err_opt),
+                             pos_pred_h) == [])
+    # Two separated holds must not be merged into one.
+    err_pred_2 = err_pred.copy()
+    err_pred_2[40:50] = 0.9
+    err_pred_2[100:110] = 0.9
+    check("two separated holds stay two episodes",
+          len(hold_snap_episodes(t_hs, err_pred_2, err_opt, pos_pred)) == 2)
+    # An unresolved hold running to the end of the record is still counted (worse, not invisible).
+    err_pred_e = err_pred.copy()
+    err_pred_e[-10:] = 0.9
+    eps_e = hold_snap_episodes(t_hs, err_pred_e, err_opt, pos_pred)
+    check("a hold that never resolves is still counted", len(eps_e) == 1, str(eps_e))
+    check("an unresolved hold is flagged unresolved", eps_e and not eps_e[0]["resolved"], str(eps_e))
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
