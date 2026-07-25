@@ -19,11 +19,15 @@ from g2_geom import load_stream
 from manifest import DEVICE_NAMES, POSE_OUTCOME, Manifest
 
 
+# candidate.stage carries enum association_hypothesis_source (association_hypothesis.h).
 STAGE_NAMES = {
-    1: "global_or_last",
-    2: "recovery",
-    3: "prior_refine",
-    4: "long_search",
+    1: "prior_pose",
+    2: "last_seen",
+    3: "labelled_pnp",
+    4: "prior_labelled_pnp",
+    5: "joint_pnp",
+    6: "cold_search",
+    7: "partner_ring",
 }
 CANDIDATE_NAMES = {0: "primary", 1: "twin"}
 

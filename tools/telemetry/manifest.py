@@ -53,6 +53,13 @@ EVENT_TYPES = {
     19: "tracker_fast_ms",
     20: "frame_dump_dropped",
     21: "camera_source_delta",
+    22: "assoc_raw_epipolar_position",
+    23: "tracker_work_units",
+    24: "world_reanchor_ang_deg",
+    25: "world_reanchor_pos_m",
+    26: "slam_frame_ts_dropped",
+    27: "camera_xfer_dropped",
+    28: "assoc_identity_defer",
 }
 
 
