@@ -48,10 +48,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from run_ab import (
         _find_controller_jsons,
-        _frames_dir,
         run_replay_dual,
         score_run,
     )
+    from frame_view import frame_source
     from replay_contract import cams_for_capture
     from mse_eval import reentry_accuracy_from_csv, reentry_snap_m_from_csv
     from manifest import DEVICE_NAMES
@@ -163,7 +163,7 @@ def measure(capture, binary, cams, left, right, out_dir, columns):
     reentry_snap_m is computed from the CSV's pred_tracked transitions (not a matched-frame metric) and
     folded into each column's dict so the gate can read it uniformly."""
     telem = Path(capture) / "telemetry"
-    frames = _frames_dir(Path(capture))
+    frames = str(frame_source(capture))
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     run_dir = out / "regression_dual"

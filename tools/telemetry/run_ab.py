@@ -26,24 +26,19 @@ Conda: PYTHONNOUSERSITE=1 ~/miniconda3/envs/g2vr/bin/python run_ab.py ...
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
-import struct
 import subprocess
 import sys
 from pathlib import Path
-from collections import Counter, defaultdict
 
 import numpy as np
 
 from smooth_ref import build_reference
 from mse_eval import load_candidate_csv, compute_metrics, csv_row_count
 import headpose_anchor as HA
+from frame_view import frame_source
 from manifest import DEVICE_NAMES
 from replay_contract import cams_for_capture, imu_cal_dir_for_capture, replay_env
-
-PGM_RE = re.compile(r"^cam(?P<cam>\d+)_t(?P<ts>\d+)_e(?P<exp>\d+)_s(?P<seq>\d+)_n(?P<n>\d+)\.pgm$")
 
 
 def _find_controller_jsons(explicit_left, explicit_right):
@@ -52,101 +47,6 @@ def _find_controller_jsons(explicit_left, explicit_right):
     left = explicit_left or next((str(p) for p in sorted(wmr.glob("controller_*L.json"))), None)
     right = explicit_right or next((str(p) for p in sorted(wmr.glob("controller_*R.json"))), None)
     return left, right
-
-
-def _frame_rows_by_key(telem: Path):
-    manifest_path = telem / "manifest.json"
-    frame_path = telem / "frame.bin"
-    if not manifest_path.is_file() or not frame_path.is_file():
-        return None
-    manifest = json.loads(manifest_path.read_text())
-    stream = manifest.get("streams", {}).get("frame")
-    if not stream:
-        return None
-    offsets = {f["name"]: int(f["offset"]) for f in stream.get("fields", [])}
-    row_size = int(stream.get("row_size", 0))
-    required = ("hw_ts_ns", "cam_id", "frame_seq", "n_blobs", "exposure")
-    if row_size <= 0 or any(k not in offsets for k in required):
-        return None
-    rows = {}
-    data = frame_path.read_bytes()
-    for pos in range(0, len(data) - row_size + 1, row_size):
-        row = data[pos : pos + row_size]
-        hw_ts = struct.unpack_from("<Q", row, offsets["hw_ts_ns"])[0]
-        cam = row[offsets["cam_id"]]
-        seq = struct.unpack_from("<I", row, offsets["frame_seq"])[0]
-        n_blobs = struct.unpack_from("<H", row, offsets["n_blobs"])[0]
-        exposure = struct.unpack_from("<H", row, offsets["exposure"])[0]
-        key = (seq, cam)
-        if key in rows:
-            raise RuntimeError(f"frame.bin duplicate seq/cam: seq={seq} cam={cam}")
-        rows[key] = (hw_ts, n_blobs, exposure)
-    return rows
-
-
-def _validate_pgm_dump(capture: Path, frames: Path, cam_count: int = 4) -> None:
-    by_key = defaultdict(list)
-    seq_counts = Counter()
-    for pgm in frames.glob("cam*_t*_e*_s*_n*.pgm"):
-        match = PGM_RE.match(pgm.name)
-        if not match:
-            continue
-        cam = int(match.group("cam"))
-        seq = int(match.group("seq"))
-        if cam < 0 or cam >= cam_count:
-            continue
-        item = (int(match.group("ts")), int(match.group("n")), int(match.group("exp")), pgm.name)
-        by_key[(seq, cam)].append(item)
-        seq_counts[seq] += 1
-
-    duplicate = {k: v for k, v in by_key.items() if len(v) != 1}
-    if duplicate:
-        examples = "; ".join(f"seq={s} cam={c} count={len(v)}" for (s, c), v in list(sorted(duplicate.items()))[:4])
-        raise RuntimeError(f"{capture}: contaminated frames/ duplicate (seq,cam): {examples}")
-
-    incomplete = [seq for seq, count in seq_counts.items() if count != cam_count]
-    if incomplete:
-        raise RuntimeError(
-            f"{capture}: contaminated frames/ has {len(incomplete)} non-{cam_count}-camera source groups"
-        )
-
-    frame_rows = _frame_rows_by_key(capture / "telemetry")
-    if frame_rows is None:
-        sys.stderr.write(f"warning: {capture}: no frame.bin authority; validated PGM dump internally only\n")
-        return
-
-    mismatches = []
-    for key, entries in by_key.items():
-        pgm_ts, pgm_n, pgm_exp, _ = entries[0]
-        frame = frame_rows.get(key)
-        if frame is None:
-            mismatches.append((key, "missing in frame.bin"))
-            continue
-        frame_ts, frame_n, frame_exp = frame
-        if (pgm_ts, pgm_n, pgm_exp) != (frame_ts, frame_n, frame_exp):
-            mismatches.append((key, f"pgm={(pgm_ts, pgm_n, pgm_exp)} frame={(frame_ts, frame_n, frame_exp)}"))
-    missing_pgms = [key for key in frame_rows if key not in by_key]
-    if mismatches or missing_pgms:
-        details = "; ".join(f"seq={k[0]} cam={k[1]} {msg}" for k, msg in mismatches[:4])
-        if missing_pgms and not details:
-            details = "; ".join(f"seq={s} cam={c} missing PGM" for s, c in missing_pgms[:4])
-        raise RuntimeError(
-            f"{capture}: frames/ does not match telemetry frame.bin "
-            f"({len(mismatches)} mismatches, {len(missing_pgms)} missing PGMs): {details}"
-        )
-
-
-def _frames_dir(capture: Path) -> str:
-    """The harness frame source: the controller PGM dump dir (pgm-dump mode = recorded SLAM head
-    pose). Falls back to the euroc mav0 dir if no frame dump is present."""
-    if (capture / "frames").is_dir():
-        frames = capture / "frames"
-        _validate_pgm_dump(capture, frames)
-        return str(frames)
-    for euroc in sorted(capture.glob("euroc*")):
-        if (euroc / "mav0" / "cam0" / "data").is_dir():
-            return str(euroc / "mav0")
-    raise FileNotFoundError(f"no frames/ or euroc*/mav0 frame source in {capture}")
 
 
 def run_replay_dual(binary, frames, cams, telem, ctrl_left, ctrl_right, out_dir, capture) -> bool:
@@ -282,7 +182,7 @@ def main() -> int:
     for cap in args.capture:
         capture = Path(os.path.expanduser(cap))
         telem = capture / "telemetry"
-        frames = _frames_dir(capture)
+        frames = str(frame_source(capture))
         cap_tag = capture.name
         cams = str(args.cams or cams_for_capture(capture))
         for btag, binary in binaries:
