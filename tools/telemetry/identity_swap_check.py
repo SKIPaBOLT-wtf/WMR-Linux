@@ -353,9 +353,10 @@ def main() -> int:
     if args.regression:
         if args.binary is None:
             ap.error("--regression needs --bin (the offline_vio_replay harness under test)")
-        if args.capture or args.cams:
-            ap.error("--regression pins its own capture and camera config per fixture; "
-                     "--capture/--cams would silently apply one fixture's inputs to all of them")
+        if args.capture or args.cams or args.gate_windows:
+            ap.error("--regression pins its own capture, camera config and windows per fixture; "
+                     "--capture/--cams/--gate-windows would silently apply one fixture's inputs "
+                     "to all of them")
         return run_regression(args)
     if args.capture is None:
         ap.error("--capture is required without --regression")
