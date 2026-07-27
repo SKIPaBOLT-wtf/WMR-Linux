@@ -21,12 +21,13 @@ knife-edge fixture windows); whole-capture counts are always reported.
 Usage:
   identity_swap_check.py REPLAY_DIR --capture CAPTURE_DIR [--cams CAMS_JSON] \
       [--ctrl-left J] [--ctrl-right J] [--own-cm 5] [--other-cm 5] [--far-own-cm 8] [--out JSON]
-  identity_swap_check.py REPLAY_DIR --regression --bin offline_vio_replay
+  identity_swap_check.py OUT_DIR --regression --bin offline_vio_replay
 
 REPLAY_DIR must contain telemetry/ (pose_attempt.bin etc. from G2_REPLAY_TELEMETRY);
-with --regression it is instead the output dir the harness is driven into, over the
-pinned fixture below. Every --regression skip path (missing harness, capture, frames
-or controller jsons) exits 77 so the ctest registration reports a LOUD SKIP.
+with --regression it is instead the output dir every pinned fixture below is driven
+into, one subdirectory per fixture, and each is gated on its own frozen windows. Every
+--regression skip path (missing harness, capture, frames or controller jsons) exits 77
+so the ctest registration reports a LOUD SKIP.
 """
 from __future__ import annotations
 
@@ -44,36 +45,67 @@ import detection_f1 as DF  # noqa: E402
 import g2_geom as G  # noqa: E402
 import gt_blob_fix as GF  # noqa: E402
 import replay_contract as RC  # noqa: E402
+from frame_view import frame_source  # noqa: E402
 from manifest import DEVICE_NAMES, Manifest  # noqa: E402
 from smooth_ref import build_reference  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 
-#: The standing identity-swap regression fixture: the capture and forced-dropout regime that
-#: reproduce the cross-device transposition, plus the episode windows the gate is pinned on. Under
-#: a 300 ms/1 s optical blackout the 20260528 xv session swapped both controllers at 60.92-62.05 s
-#: (mutual: each device accepted the partner's LED ring) and mis-acquired dev1 onto dev2's ring at
-#: 76.13-77.30 s after a 1.8 s starve. Zero SWAP accepts inside these windows is the gate.
-REGRESSION_FIXTURE = {
-    "capture": ROOT / "captures/20260528-080421-xv-session1",
-    "frames": ROOT / "captures/20260528-080421-xv-session1-framebin/frames",
-    "drop_env": {
-        "G2_REPLAY_DROP_OPTICAL_PERIOD_MS": "1000",
-        "G2_REPLAY_DROP_OPTICAL_DURATION_MS": "300",
+#: The standing identity-swap regression fixtures. Each pins a capture, the replay regime that
+#: reproduces cross-device transposition on it, and the frozen episode windows the gate counts in.
+#: Zero SWAP accepts inside those windows is the gate; whole-capture counts are always reported.
+#:
+#: A window is pinned only where the capture makes identity physically contestable AND the shipped
+#: tracker is clean, so the gate reads "this stays clean" rather than "this is still broken". Each
+#: capture also carries a KNOWN one-sided steal that is deliberately NOT gated (xv1 dev1 onto dev2's
+#: ring at 76.6-77.3 s after a 1.8 s starve, 16 accepts; July-23 dev1 at 98.2 s, 2 accepts, 0.4 cm
+#: from the partner's reference at 35 cm ring separation) — those are open front-end debt, and a gate
+#: that fails on the tracker it guards guards nothing.
+REGRESSION_FIXTURES = (
+    {
+        # Under a 300 ms/1 s optical blackout both controllers trade LED rings at 60.92-62.05 s:
+        # each device accepts the partner's ring, the mutual two-way transposition.
+        "name": "xv1-blackout",
+        "capture": ROOT / "captures/20260528-080421-xv-session1",
+        "drop_env": {
+            "G2_REPLAY_DROP_OPTICAL_PERIOD_MS": "1000",
+            "G2_REPLAY_DROP_OPTICAL_DURATION_MS": "300",
+        },
+        "windows": ((60.9, 62.1),),
     },
-    "mutual_window": (60.9, 62.1),
-}
+    {
+        # The hands-close class of results/recall-cycle-20260723: a stale coasted prior re-acquires
+        # the partner's LED ring, the fold poisons the prior, and both devices settle into a
+        # mutually-exclusive swapped equilibrium. Needs no forced dropout — the capture's own
+        # hands-close instants are the stimulus, and the capture's cleaned-GT confirms both windows
+        # are exactly where the two rings close to ~20 cm (41.90-45.02 s and 119.26-119.54 s are
+        # sub-30 cm runs; 41.9-45.0 is 80.6 % scorable, 119.3-120.4 is 100 % scorable for dev2).
+        # This is the class that took an otherwise-clean anchor fix from 2 to 93 swap accepts
+        # (results/cluster-jump-20260725) and a pre-filter removal from 0 to 5
+        # (results/lockout-20260725), with no standing bar in either case.
+        "name": "jul23-hands-close",
+        "capture": ROOT / "captures/20260723-112531-comprehensive-stack",
+        "drop_env": {},
+        "windows": ((41.9, 45.0), (119.3, 120.4)),
+    },
+)
 
 
-def run_fixture_replay(binary: Path, out_dir: Path, ctrl_left: str, ctrl_right: str) -> int:
-    """Drive the harness over the regression fixture into out_dir. 0 = produced, 77 = SKIP."""
-    fixture = REGRESSION_FIXTURE
+def run_fixture_replay(binary: Path, out_dir: Path, fixture: dict, ctrl_left: str,
+                       ctrl_right: str) -> int:
+    """Drive the harness over one fixture into out_dir. 0 = produced, 77 = SKIP."""
     for label, path in (("harness binary", binary), ("capture", fixture["capture"]),
-                        ("frames", fixture["frames"]), ("left controller json", Path(ctrl_left)),
+                        ("left controller json", Path(ctrl_left)),
                         ("right controller json", Path(ctrl_right))):
         if not Path(path).exists():
             print(f"SKIP: {label} not found ({path}) -- identity-swap gate not run")
             return 77
+    try:
+        frames = frame_source(fixture["capture"])
+    except (OSError, RuntimeError) as exc:
+        print(f"SKIP: no replayable frame set for {fixture['name']} ({exc}) "
+              f"-- identity-swap gate not run")
+        return 77
     telemetry = out_dir / "telemetry"
     replay_out = out_dir / "out"
     for path in (telemetry, replay_out):
@@ -81,14 +113,14 @@ def run_fixture_replay(binary: Path, out_dir: Path, ctrl_left: str, ctrl_right: 
     env = RC.replay_env(fixture["drop_env"], {"G2_REPLAY_TELEMETRY": str(telemetry)},
                         imu_cal_dir=RC.imu_cal_dir_for_capture(fixture["capture"]))
     proc = subprocess.run(
-        [str(binary), str(fixture["frames"]), str(RC.cams_for_capture(fixture["capture"])),
+        [str(binary), str(frames), str(RC.cams_for_capture(fixture["capture"])),
          str(fixture["capture"] / "telemetry"), ctrl_left, ctrl_right, str(replay_out)],
         env=env, capture_output=True, text=True)
     for line in (proc.stderr or "").splitlines():
         if any(key in line for key in ("WARN", "ERROR", "FATAL")):
             print(f"replay {line}", file=sys.stderr)
     if proc.returncode != 0:
-        print(f"FATAL: fixture replay failed ({proc.returncode})", file=sys.stderr)
+        print(f"FATAL: {fixture['name']} replay failed ({proc.returncode})", file=sys.stderr)
         return 2
     return 0
 
@@ -208,6 +240,63 @@ def render_swaps(out_dir: Path, capdir: Path, dev: int, recs, poses, cams, cams_
     return written
 
 
+def score_replay(replay: Path, capture: Path, cams_json: str, windows, own_cm: float,
+                 other_cm: float, far_own_cm: float, render: Path | None):
+    """Classify every accepted optical pose of `replay` against `capture`'s two cleaned-GT tracks.
+
+    Prints the per-device tally, the swap episodes, and the two-way transposition signature inside
+    each gated window. Returns the verdict dict (`gated_swaps` is the exit gate's count), or None
+    when the capture cannot serve as a reference.
+    """
+    cap_telem = capture / "telemetry"
+    cams = DF.load_cameras(cams_json)
+    refs = {d: build_reference(cap_telem, d) for d in (1, 2)}
+    if refs[1] is None or refs[2] is None:
+        print("FATAL: missing cleaned-GT reference for a device", file=sys.stderr)
+        return None
+    hp = DF._load_head_pose(cap_telem)
+    if hp is None:
+        print("FATAL: no head_pose.bin in the reference capture", file=sys.stderr)
+        return None
+    frames = G.load_stream(cap_telem, Manifest.load(cap_telem), "frame")
+    t0 = int(frames["hw_ts_ns"].astype(np.int64).min())
+
+    verdict = {"replay": str(replay), "capture": str(capture), "own_cm": own_cm,
+               "other_cm": other_cm, "far_own_cm": far_own_cm, "gate_windows": windows,
+               "devices": {}}
+    all_recs = {}
+    total_swaps = 0
+    gated_swaps = 0
+    for dev in (1, 2):
+        counts, recs, poses = classify_device(replay / "telemetry", cap_telem, dev, cams, refs, hp,
+                                              own_cm, other_cm, far_own_cm, t0,
+                                              collect_poses=render is not None)
+        if render is not None:
+            n = render_swaps(render, capture, dev, recs, poses, cams, cams_json)
+            print(f"  rendered {n} panel(s) -> {render}")
+        all_recs[dev] = recs
+        eps = episodes(recs)
+        verdict["devices"][str(dev)] = {"counts": counts, "episodes": eps, "swap_rows": recs}
+        total_swaps += counts["SWAP"]
+        if windows is not None:
+            gated_swaps += sum(1 for r in recs
+                               if any(lo <= r["t_rel_s"] <= hi for lo, hi in windows))
+        print(f"dev{dev} ({DEVICE_NAMES.get(dev, str(dev))}): "
+              + "  ".join(f"{k}={v}" for k, v in counts.items()))
+        for e in eps:
+            print(f"  swap episode {e['start_s']:.2f}s - {e['end_s']:.2f}s  ({e['n']} accepts)")
+
+    verdict["total_swaps"] = total_swaps
+    verdict["gated_swaps"] = gated_swaps if windows is not None else total_swaps
+    verdict["mutual_swap_frames"] = {}
+    for lo, hi in windows or ():
+        mutual = mutual_swap_frames(all_recs, (lo, hi))
+        verdict["mutual_swap_frames"][f"{lo}-{hi}"] = mutual
+        print(f"  window {lo}-{hi}s: two-way transposition frames: {len(mutual)}"
+              + (f" -> {mutual[:8]}" if mutual else ""))
+    return verdict
+
+
 def mutual_swap_frames(recs_by_dev, window, tol_ns: int = 20_000_000):
     """Frames where BOTH devices accepted a pose on the other's reference at the same instant — the
     two-way transposition signature. A one-sided steal is a single device losing its track; a mutual
@@ -241,9 +330,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("replay", help="replay output dir (contains telemetry/); with --regression, "
-                                   "the dir the fixture replay is driven into")
+                                   "the dir each fixture replay is driven into")
     ap.add_argument("--regression", action="store_true",
-                    help="run the pinned REGRESSION_FIXTURE replay with --bin and gate on its windows")
+                    help="run every pinned REGRESSION_FIXTURES replay with --bin and gate each on "
+                         "its own frozen windows")
     ap.add_argument("--bin", dest="binary", help="offline_vio_replay harness (required by --regression)")
     ap.add_argument("--capture", help="reference capture dir (cleaned-GT + head pose)")
     ap.add_argument("--cams", help="hmd-cameras.json (default: the capture's own provenance snapshot)")
@@ -263,81 +353,68 @@ def main() -> int:
     if args.regression:
         if args.binary is None:
             ap.error("--regression needs --bin (the offline_vio_replay harness under test)")
-        args.capture = args.capture or str(REGRESSION_FIXTURE["capture"])
-        args.cams = args.cams or str(RC.cams_for_capture(REGRESSION_FIXTURE["capture"]))
-        code = run_fixture_replay(Path(args.binary), Path(args.replay), args.ctrl_left, args.ctrl_right)
-        if code != 0:
-            return code
-    elif args.capture is None:
+        if args.capture or args.cams:
+            ap.error("--regression pins its own capture and camera config per fixture; "
+                     "--capture/--cams would silently apply one fixture's inputs to all of them")
+        return run_regression(args)
+    if args.capture is None:
         ap.error("--capture is required without --regression")
     args.cams = args.cams or str(RC.cams_for_capture(args.capture))
-    gate_windows = None
+    windows = None
     if args.gate_windows:
-        gate_windows = [tuple(float(x) for x in w.split("-")) for w in args.gate_windows.split(",")]
+        windows = [tuple(float(x) for x in w.split("-")) for w in args.gate_windows.split(",")]
 
-    cap = Path(args.capture)
-    cap_telem = cap / "telemetry"
-    replay_telem = Path(args.replay) / "telemetry"
-    cams = DF.load_cameras(args.cams)
-    refs = {d: build_reference(cap_telem, d) for d in (1, 2)}
-    if refs[1] is None or refs[2] is None:
-        print("FATAL: missing cleaned-GT reference for a device", file=sys.stderr)
+    verdict = score_replay(Path(args.replay), Path(args.capture), args.cams, windows, args.own_cm,
+                           args.other_cm, args.far_own_cm,
+                           Path(args.render) if args.render else None)
+    if verdict is None:
         return 2
-    hp = DF._load_head_pose(cap_telem)
-    if hp is None:
-        print("FATAL: no head_pose.bin in the reference capture", file=sys.stderr)
-        return 2
-    m = Manifest.load(cap_telem)
-    fr = G.load_stream(cap_telem, m, "frame")
-    t0 = int(fr["hw_ts_ns"].astype(np.int64).min())
-
-    verdict = {"replay": str(args.replay), "capture": str(cap),
-               "own_cm": args.own_cm, "other_cm": args.other_cm, "far_own_cm": args.far_own_cm,
-               "gate_windows": gate_windows, "devices": {}}
-    total_swaps = 0
-    gated_swaps = 0
-    all_recs = {}
-    for dev in (1, 2):
-        counts, recs, poses = classify_device(replay_telem, cap_telem, dev, cams, refs, hp,
-                                              args.own_cm, args.other_cm, args.far_own_cm, t0,
-                                              collect_poses=args.render is not None)
-        if args.render:
-            n = render_swaps(Path(args.render), cap, dev, recs, poses, cams, args.cams)
-            print(f"  rendered {n} panel(s) -> {args.render}")
-        all_recs[dev] = recs
-        eps = episodes(recs)
-        verdict["devices"][str(dev)] = {"counts": counts, "episodes": eps, "swap_rows": recs}
-        total_swaps += counts["SWAP"]
-        if gate_windows is not None:
-            gated_swaps += sum(1 for r in recs
-                               if any(lo <= r["t_rel_s"] <= hi for lo, hi in gate_windows))
-        name = DEVICE_NAMES.get(dev, str(dev))
-        print(f"dev{dev} ({name}): " + "  ".join(f"{k}={v}" for k, v in counts.items()))
-        for e in eps:
-            print(f"  swap episode {e['start_s']:.2f}s - {e['end_s']:.2f}s  ({e['n']} accepts)")
-
-    if args.regression:
-        mutual = mutual_swap_frames(all_recs, REGRESSION_FIXTURE["mutual_window"])
-        verdict["mutual_swap_frames"] = mutual
-        lo, hi = REGRESSION_FIXTURE["mutual_window"]
-        print(f"mutual two-way transposition frames in {lo}-{hi}s: {len(mutual)}"
-              + (f" -> {mutual}" if mutual else ""))
-        if mutual:
-            print(f"FAIL: {len(mutual)} mutual two-way transposition frame(s)")
-            return 1
-        print("PASS: no mutual two-way transposition")
-        return 0
-    verdict["total_swaps"] = total_swaps
-    gate_count = gated_swaps if gate_windows is not None else total_swaps
-    verdict["gated_swaps"] = gate_count
     if args.out:
         Path(args.out).write_text(json.dumps(verdict, indent=1))
         print(f"wrote {args.out}")
-    scope = "in gate windows" if gate_windows is not None else "whole capture"
-    if gate_count > 0:
-        print(f"FAIL: {gate_count} identity-swap accepts {scope} ({total_swaps} whole-capture)")
+    scope = "in gate windows" if windows is not None else "whole capture"
+    if verdict["gated_swaps"] > 0:
+        print(f"FAIL: {verdict['gated_swaps']} identity-swap accepts {scope} "
+              f"({verdict['total_swaps']} whole-capture)")
         return 1
-    print(f"PASS: zero identity-swap accepts {scope} ({total_swaps} whole-capture)")
+    print(f"PASS: zero identity-swap accepts {scope} ({verdict['total_swaps']} whole-capture)")
+    return 0
+
+
+def run_regression(args) -> int:
+    """Replay and gate every pinned fixture. 0 = all clean, 1 = a gated window swapped, 77 = SKIP."""
+    verdicts = []
+    failed = []
+    for fixture in REGRESSION_FIXTURES:
+        out_dir = Path(args.replay) / fixture["name"]
+        print(f"=== fixture {fixture['name']}: {fixture['capture'].name} "
+              f"windows={fixture['windows']}")
+        code = run_fixture_replay(Path(args.binary), out_dir, fixture, args.ctrl_left,
+                                  args.ctrl_right)
+        if code != 0:
+            return code
+        verdict = score_replay(out_dir, fixture["capture"],
+                               str(RC.cams_for_capture(fixture["capture"])),
+                               fixture["windows"], args.own_cm, args.other_cm, args.far_own_cm,
+                               Path(args.render) / fixture["name"] if args.render else None)
+        if verdict is None:
+            return 2
+        verdict["fixture"] = fixture["name"]
+        verdicts.append(verdict)
+        if verdict["gated_swaps"]:
+            failed.append(fixture["name"])
+            print(f"FAIL: {fixture['name']}: {verdict['gated_swaps']} identity-swap accepts in "
+                  f"{fixture['windows']} ({verdict['total_swaps']} whole-capture)")
+        else:
+            print(f"PASS: {fixture['name']}: zero identity-swap accepts in {fixture['windows']} "
+                  f"({verdict['total_swaps']} whole-capture)")
+    if args.out:
+        Path(args.out).write_text(json.dumps(verdicts, indent=1))
+        print(f"wrote {args.out}")
+    if failed:
+        print(f"FAIL: identity-swap gate failed on {', '.join(failed)}")
+        return 1
+    print(f"PASS: {len(verdicts)} identity-swap fixture(s) clean in every gated window")
     return 0
 
 
