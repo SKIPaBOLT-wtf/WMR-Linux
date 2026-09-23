@@ -1,6 +1,6 @@
 # Agent instructions
 
-Use English. Read `prompts/CONTINUE.md`, `docs/current/STATUS.md`, `docs/PROVENANCE.md` and the selected profile before changing runtime behavior. Historical upstream setup scripts are not the recommended installer for this continuation.
+Use English. Follow `prompts/OPERATING-RULES.md` as the short standing instruction. Before changing runtime behavior, read `docs/current/STATUS.md`, `docs/PROVENANCE.md` and the selected profile; consult relevant sections of `prompts/LOCAL-TRACKING.md` or `prompts/CONTINUE.md` as needed. Historical upstream setup scripts are not the recommended installer for this continuation.
 
 Preserve working display, native refresh rate, NVIDIA workaround, game and input paths. Tracking is not physically accepted. Never install a rejected backend or turn on experimental calibration/bias options merely because they compile. Do not use OpenVR GL mirror-texture APIs on the reference machine. Do not alter live VR for documentation/packaging tasks.
 
