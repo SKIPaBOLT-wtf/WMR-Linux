@@ -1,0 +1,28 @@
+{
+  "iteration_id": "2026-09-23-source-continuation",
+  "package_tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "runtime_commit": "68aa0d485d79a37ce393a202f06df705c73bc307",
+  "runtime_build": "passed on reference development host",
+  "runtime_ctest": {
+    "passed": 5,
+    "failed": 0
+  },
+  "public_synthetic_suites": {
+    "hid_groups": 16,
+    "bias_groups": 25,
+    "bias_assertions": 395,
+    "bias_negative_controls": 2,
+    "mask_groups": 13,
+    "mask_assertions": 95
+  },
+  "source_import_hashes_verified": 40,
+  "display_patch_source_reconstruction": "exact",
+  "privacy_diff_scan": "no concrete private patterns found; manual source/asset review also performed",
+  "private_handoff_git_ignored": true,
+  "remote_ci": "not run; publication pending",
+  "physical_acceptance": false,
+  "live_install_changed": false
+}

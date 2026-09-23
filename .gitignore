@@ -61,3 +61,36 @@ __pycache__/
 vendor/
 # Kernel-signing MOK (PRIVATE KEY — never commit).
 /infra/mok-kernel/
+
+# Private local evidence must never be published.
+PRIVATE-HANDOFF.md
+private/
+private-evidence/
+recordings/
+config-backup/
+__pycache__/
+*.pyc
+*.core
+*.dmp
+*.reg
+*.hiv
+*.pem
+*.key
+.env
+build/
+dist/
+
+# Reviewed portable continuation documentation and synthetic tests.
+!/AGENTS.md
+!/docs/UPSTREAM-README.md
+!/docs/PROVENANCE.md
+!/docs/PUBLICATION.md
+!/docs/INSTALLATION.md
+!/docs/ROADMAP.md
+!/docs/RELEASE-GATES.md
+!/docs/DISCOVERY.md
+!/docs/current/
+!/docs/iterations/
+!/tests/
+/tests/*
+!/tests/test_wmrctl.py

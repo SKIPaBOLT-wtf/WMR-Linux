@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "hp-reverb-g2-nvidia-ubuntu",
+  "qualification": "development-reference-not-tracking-accepted",
+  "headset": {"family": "HP Reverb G2", "calibration": "read-own-device-factory", "panel_mode": [4320, 2160, 90], "slam_cameras": 2},
+  "platform": {"os": "Ubuntu", "version": "26.04.1", "session": "GNOME Wayland", "architecture": "x86_64"},
+  "gpu": {"vendor": "NVIDIA", "reference_model": "RTX 4080 SUPER", "reference_driver": "595.91.07", "workarounds": "version-specific-manual-review"},
+  "runtime": {"frontend": "SteamVR OpenVR driver", "backend": "Basalt VIT", "backend_source": "30ece25f4c7d86e6a9dbee7ff0ebd0b921344a67", "backend_sha256": "de4f9d30ae0417203796d51ffa66cc56e7c79ec06394a0a60387d68e9516b73c"},
+  "environment": {"WMR_SLAM": "true", "WMR_MAX_SLAM_CAMS": "2", "WMR_AUTOEXPOSURE": "true", "WMR_HANDTRACKING": "false", "WMR_CLOCK_WINDOWED": "false", "SLAM_SUBMIT_FROM_START": "true", "G2_REQUIRE_VISUAL_OBSERVATIONS": "true", "G2_PREDICT_WITH_VIT_BIAS": "false"},
+  "unset": ["WMR_HT1_EXTRINSICS_OVERRIDE", "SLAM_CONFIG"],
+  "automatic_system_changes": false
+}

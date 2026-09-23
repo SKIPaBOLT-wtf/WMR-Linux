@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "iteration_id": "2026-09-23-source-continuation",
+  "qualification": "experimental-source-snapshot",
+  "publication_state": "prepared-locally-awaiting-github-forks",
+  "integration": {
+    "planned_repository": "https://github.com/SKIPaBOLT-wtf/WMR-Linux",
+    "branch": "g2-stability",
+    "upstream": "https://github.com/AshishKumar4/Project-VR",
+    "upstream_commit": "d92aa7f1877ae8f77aff81e476dd90e881e652b2",
+    "commit": "resolve containing commit with git rev-parse HEAD"
+  },
+  "runtime": {
+    "planned_repository": "https://github.com/SKIPaBOLT-wtf/monado-wmr",
+    "branch": "g2-stability",
+    "commit": "68aa0d485d79a37ce393a202f06df705c73bc307",
+    "upstream": "https://github.com/AshishKumar4/monado-wmr",
+    "upstream_commit": "431ee47b89565ce6cbf57ea43f3dad6d0361ec44"
+  },
+  "backend": {
+    "source": "https://gitlab.freedesktop.org/mateosss/basalt",
+    "commit": "30ece25f4c7d86e6a9dbee7ff0ebd0b921344a67",
+    "reference_sha256": "de4f9d30ae0417203796d51ffa66cc56e7c79ec06394a0a60387d68e9516b73c",
+    "bundled": false,
+    "source_rebuild_qualified": false
+  },
+  "profile": "profiles/hp-reverb-g2-nvidia-ubuntu.json",
+  "physical_tracking_accepted": false,
+  "consumer_installer_available": false,
+  "live_install_changed_by_bootstrap": false
+}

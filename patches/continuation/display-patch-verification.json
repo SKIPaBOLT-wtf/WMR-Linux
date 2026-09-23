@@ -1,0 +1,28 @@
+{
+  "base": "9f087a6d4e86d85acc0ce1d354d6276fe5047b29",
+  "patched_commit": "aefe80a8f1b65bff45119360c8f5bf5a69835a8c",
+  "working_diff_exactly_equals_combined_patch": true,
+  "combined_patch_sha256": "ade6338474fdd75f91a3f2c03a5c6d1d33cb082a6082220f1b1b68dcb263fdca",
+  "applications": [
+    {
+      "patch": "0001-nvkms-VESA-DisplayID-DSC-VSDB-spec-correctness-fixes.patch",
+      "status": 0,
+      "details": ""
+    },
+    {
+      "patch": "0002-nvkms-nvidia-drm-enable-Wayland-DRM-lease-of-VR-HMDs.patch",
+      "status": 0,
+      "details": ""
+    },
+    {
+      "patch": "0003-dp-force-maximum-link-config-for-the-HP-Reverb-G2-ED.patch",
+      "status": 0,
+      "details": ""
+    }
+  ],
+  "reconstructed_tree": "9726da23d0fcdf70fee9919f9a3f87c1d289c9e2",
+  "target_tree": "9726da23d0fcdf70fee9919f9a3f87c1d289c9e2",
+  "exact_tree_match": true,
+  "continuation_applies_cleanly": true,
+  "continuation_apply_details": ""
+}

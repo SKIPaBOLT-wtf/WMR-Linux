@@ -1,0 +1,44 @@
+diff --git a/src/common/displayport/src/dp_wardatabase.cpp b/src/common/displayport/src/dp_wardatabase.cpp
+index a075e8e..34de700 100644
+--- a/src/common/displayport/src/dp_wardatabase.cpp
++++ b/src/common/displayport/src/dp_wardatabase.cpp
+@@ -547,16 +547,19 @@ void Edid::applyEdidWorkArounds(NvU32 warFlag, const DpMonitorDenylistData *pDen
+             }
+             break;
+ 
+-        // HP Reverb G2 VR headset (and other HP HMDs)
+-        // ManufID 0x220E = 'HPN' = HP Inc.
++        // HP Reverb G2 VR headset.
++        // getManufId() reads EDID bytes 22 0e as 0x0E22 ('HPN').
+         // Workaround for NVIDIA bug 5923212: the G2 trains at 2 DP lanes
+         // instead of 4 on NVIDIA Linux without this WAR, capping it to
+         // 2880x1440@60. Forcing max link config (HBR3 x4) is the first step
+         // toward enabling 4320x2160 native modes.
+-        case 0x220E:
+-            this->WARFlags.forceMaxLinkConfig = true;
+-            DP_PRINTF(DP_NOTICE, "DP-WAR> Force maximum link config for HP HMD (Reverb G2 / similar).");
+-            DP_PRINTF(DP_NOTICE, "DP-WAR>   workaround for NVIDIA bug 5923212");
++        case 0x0E22:
++            if (ProductID == 0x36C1)
++            {
++                this->WARFlags.forceMaxLinkConfig = true;
++                DP_PRINTF(DP_NOTICE, "DP-WAR> Force maximum link config for HP Reverb G2.");
++                DP_PRINTF(DP_NOTICE, "DP-WAR>   workaround for NVIDIA bug 5923212");
++            }
+             break;
+ 
+         // CMN
+diff --git a/src/nvidia-modeset/src/nvkms-dpy.c b/src/nvidia-modeset/src/nvkms-dpy.c
+index 01869f7..58346fc 100644
+--- a/src/nvidia-modeset/src/nvkms-dpy.c
++++ b/src/nvidia-modeset/src/nvkms-dpy.c
+@@ -3454,7 +3454,8 @@ NvKmsDpyOutputColorFormatInfo nvDpyGetOutputColorFormatInfo(
+                         NV_KMS_DPY_ATTRIBUTE_CURRENT_COLOR_BPC_10;
+                     colorFormatsInfo.yuv444.maxBpc =
+                         NV_KMS_DPY_ATTRIBUTE_CURRENT_COLOR_BPC_10;
+-                } else if (pDpyEvo->parsedEdid.info.input.u.digital.bpc < 8) {
++                } else if (pDpyEvo->parsedEdid.info.input.u.digital.bpc != 0 &&
++                           pDpyEvo->parsedEdid.info.input.u.digital.bpc < 8) {
+                     colorFormatsInfo.rgb444.maxBpc =
+                         NV_KMS_DPY_ATTRIBUTE_CURRENT_COLOR_BPC_6;
+                     colorFormatsInfo.yuv444.maxBpc =
