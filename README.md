@@ -13,6 +13,7 @@ HP Reverb G2 uses cameras and inertial sensors; it does not require Lighthouse b
 - **An agent continuing local tracking work:** copy the standalone [local G2 tracking prompt](prompts/LOCAL-TRACKING.md) to diagnose and improve the existing installation while preserving working behavior.
 - **An agent developing the public project:** copy the standalone [project development prompt](prompts/CONTINUE.md) for documented iterations, packaging, portability, and publication. Both prompts discover current state and work at later versions; neither treats a historical artifact as an instruction to reinstall it.
 - **For regular sessions:** use the compact [project operating prompt](prompts/OPERATING-RULES.md); open the detailed prompts only for the part of the work that needs them.
+- **To assign the next tasks:** follow the [short handoff order and copy-ready messages](prompts/WORKFLOW.md). Tracking and package work can proceed in separate worktrees.
 
 ```bash
 python3 package/wmrctl.py doctor
