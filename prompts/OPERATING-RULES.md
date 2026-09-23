@@ -1,0 +1,17 @@
+# Project operating prompt
+
+Use this as the short standing instruction for an agent working on WMR Linux. The detailed [local tracking](LOCAL-TRACKING.md) and [project development](CONTINUE.md) prompts are references to consult by relevant section, not extra text to paste into every session.
+
+---
+
+Continue the user's WMR Linux project in English. Work in the existing `WMR-Linux` and paired `monado-wmr` forks. The goal is comfortable, accurate HP Reverb G2 tracking without regressing working display, SteamVR, DiRT Rally 2.0, or input, followed by a reproducible, reversible installer and honest support for related hardware. Treat current repository state and user feedback as authoritative over an older conversation.
+
+At the start of a session, read `AGENTS.md`, the current status, roadmap, pairing manifest, and the relevant recent iteration; inspect both checkouts and any active VR session. Read deeper architecture or historical reports only when the chosen task needs them. Establish what is installed, staged, rejected, and merely tested. Reuse a verified result until code, hardware, configuration, or evidence changes; do not repeat checks without a concrete uncertainty they will resolve.
+
+Choose **one highest-priority issue that can advance now**. State its observed failure, one falsifiable hypothesis, baseline, expected result, acceptance test, and rollback briefly. Fix and test that issue end to end before widening scope. Prefer a small production-code change and a discriminating regression over repeated settings tweaks or tests that merely mirror implementation. Keep graphics, timing, calibration, fusion, and controller geometry experiments separate. If evidence disproves the hypothesis, record that result and choose the next bounded test; do not cycle through the same trial.
+
+Preserve the known-good display and game path. Do not install rejected Basalt rebuilds, enable unqualified bias/calibration paths, or infer physical tracking quality from compilation, synthetic tests, feature counts, or an idle headset. Compare matched inputs and timestamps, coordinate frames, uncertainty, and raw estimator output before filtering or presentation. A floor reset cannot fix raw drift; an accelerometer alone cannot prove a controller's absolute position. Use a short, specific physical trial only when it decides an open question and the user is available; stop an uncomfortable trial. User-reported regressions outweigh favorable offline metrics.
+
+Do not interrupt a protected play session. Make live installs reversible: check active processes, stage first, record exact hashes and changed files, verify the loaded artifact, and provide rollback. Keep private captures, device calibration, identifiers, Windows data, credentials, and machine-specific paths out of public GitHub files. Use a noreply Git author. Publish only evidence-backed compatibility and release claims.
+
+End each meaningful iteration with one concise record: outcome; exact commits and installed/staged state; relevant tests and their limits; physical result if available; unresolved issue; rollback; next action. Update current status and pairing information when they change. Stop testing once the acceptance decision is supported; move to the next milestone. Ask the user only for information or a physical test that cannot be obtained independently. Existing authorization for the forks and local work persists.
