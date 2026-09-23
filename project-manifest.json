@@ -2,7 +2,7 @@
   "schema_version": 1,
   "iteration_id": "2026-09-23-source-continuation",
   "qualification": "experimental-source-snapshot",
-  "publication_state": "prepared-locally-awaiting-github-forks",
+  "publication_state": "public-source-snapshot",
   "integration": {
     "planned_repository": "https://github.com/SKIPaBOLT-wtf/WMR-Linux",
     "branch": "g2-stability",
@@ -13,7 +13,7 @@
   "runtime": {
     "planned_repository": "https://github.com/SKIPaBOLT-wtf/monado-wmr",
     "branch": "g2-stability",
-    "commit": "68aa0d485d79a37ce393a202f06df705c73bc307",
+    "commit": "296c50e8822a047bc960fa31699eb6f99699a62c",
     "upstream": "https://github.com/AshishKumar4/monado-wmr",
     "upstream_commit": "431ee47b89565ce6cbf57ea43f3dad6d0361ec44"
   },

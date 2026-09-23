@@ -1,6 +1,6 @@
-# Reusable continuation prompt
+# Prompt 2 — Develop and publish the WMR Linux project
 
-Copy everything below into a new agent working in this repository or a later fork/version of it.
+Copy everything below into an agent responsible for the public project, packaging, documentation and iterative development. It works for the initial publication and later fork versions. For a focused local hardware repair session, use LOCAL-TRACKING.md.
 
 ---
 
@@ -12,7 +12,7 @@ Read AGENTS.md, README.md, docs/current/STATUS.md, docs/PROVENANCE.md, docs/ROAD
 
 Do not assume the dates, hashes or paths from an earlier conversation are still current. Use repository-relative paths and XDG locations. Keep private evidence outside Git in a local evidence directory; a PRIVATE-HANDOFF.md or WMR_PRIVATE_EVIDENCE environment variable may locate it. A different machine may not have the original private recordings. Say when evidence is unavailable; public claims must remain independently understandable.
 
-If this is the initial publication, preserve the verified original upstream history and create/update the user's fork, never the original author's repository. Check the authenticated account and remote before mutation. On subsequent versions, continue the actual fork and branch instead of creating duplicate projects or resetting to the original snapshot. Never overwrite unrelated work. Use separate, reviewable commits and a privacy-safe Git author identity.
+If this is the initial publication, preserve the verified original upstream history and create/update the user's fork, never the original author's repository. Check the authenticated account and remote before mutation. The owner has authorized work on the intended forks and local files; do not request the same routine permission again. Use available authenticated GitHub tooling, and distinguish a missing tool capability or browser sign-in from missing user authorization. Never retrieve or expose hidden credentials to compensate for a missing action. On subsequent versions, continue the actual fork and branch instead of creating duplicate projects or resetting to the original snapshot. Never overwrite unrelated work. Use separate, reviewable commits and a privacy-safe Git author identity.
 
 ## 2. Non-regression contract
 

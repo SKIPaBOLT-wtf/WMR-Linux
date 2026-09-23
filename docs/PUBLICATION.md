@@ -1,14 +1,9 @@
-# Publication status and completion procedure
+# Publication
 
-This source continuation was prepared locally with original upstream ancestry. GitHub fork creation requires an authenticated GitHub browser session; the available connector supports repository contents but does not expose fork creation. Until remote verification is recorded, planned repository URLs are not proof of publication.
+The public forks are [WMR-Linux](https://github.com/SKIPaBOLT-wtf/WMR-Linux) and [monado-wmr](https://github.com/SKIPaBOLT-wtf/monado-wmr). Both preserve the original developer histories. The continuation branch is `g2-stability`; its exact runtime pairing is in `project-manifest.json`.
 
-Intended forks under the authenticated owner's account:
+Public source snapshots remain experimental. No tracking acceptance or consumer binary release is implied. The two agent prompts are `prompts/LOCAL-TRACKING.md` for local diagnosis and `prompts/CONTINUE.md` for project/package development at this or later versions.
 
-- `WMR-Linux`, forked from `AshishKumar4/Project-VR`.
-- `monado-wmr`, forked from `AshishKumar4/monado-wmr`.
+Publication preserves reviewed local commits and noreply author metadata. A temporary repository-local GitHub Actions import can transfer a checksum-pinned source-only Git bundle using the repository's existing scoped workflow token; it must verify the bundle and target commit and use a normal fast-forward push. No personal token, private recording, unit calibration, registry data or local binary belongs in that transfer.
 
-Before publication, recheck the authenticated account, `origin` and `upstream`, exact staged/committed diff, commit metadata and privacy review. Fork the upstream repositories rather than initialize empty unrelated histories. Push `g2-stability` with a fast-forward/new-branch operation. Do not force-push or change the original author's repository. Select `g2-stability` as the fork's default branch so visitors see the continuation status.
-
-Set the accurate description and topics from DISCOVERY.md; enable issues for the new project. Verify both remote branch hashes against local commits, both-way links, README rendering and CI status. Update publication status only after the remote exists and has the actual continuation commits. Do not claim CI passed until GitHub has run it.
-
-If Git push uses GitHub account privacy protection, retain the noreply author identity. Do not publish a token, paste credentials into source files, or loosen account privacy settings. If authenticated publication is unavailable, preserve completed local commits and report the specific remaining authentication step.
+For subsequent updates, verify the authenticated account and remotes, exact diff, author metadata and privacy before pushing. Keep default branch, README, runtime pairing, release state and current CI evidence synchronized. Never treat workflow configuration alone as a successful CI run. External promotion uses the truthful draft in DISCOVERY.md and needs explicit outreach authorization.

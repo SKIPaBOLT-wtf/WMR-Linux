@@ -4,7 +4,7 @@
     "passed": 7,
     "failed": 0
   },
-  "runtime_commit": "68aa0d485d79a37ce393a202f06df705c73bc307",
+  "runtime_commit": "296c50e8822a047bc960fa31699eb6f99699a62c",
   "runtime_build": "passed on reference development host",
   "runtime_ctest": {
     "passed": 5,
@@ -22,7 +22,7 @@
   "display_patch_source_reconstruction": "exact",
   "privacy_diff_scan": "no concrete private patterns found; manual source/asset review also performed",
   "private_handoff_git_ignored": true,
-  "remote_ci": "not run; publication pending",
+  "remote_ci": "Consult GitHub Actions for current run; local tests passed",
   "physical_acceptance": false,
   "live_install_changed": false
 }

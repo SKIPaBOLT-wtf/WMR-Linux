@@ -10,7 +10,8 @@ HP Reverb G2 uses cameras and inertial sensors; it does not require Lighthouse b
 
 - **Users:** [status and limitations](docs/current/STATUS.md), [tracking questions](docs/current/TRACKING-FAQ.md), [hardware profiles](profiles/README.md), [installation and rollback](docs/INSTALLATION.md).
 - **Developers:** [architecture and open questions](docs/current/TRACKING-ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [contributing](CONTRIBUTING.md), [provenance](docs/PROVENANCE.md).
-- **A new coding agent:** copy the complete [continuation prompt](prompts/CONTINUE.md). It works from the repository's current state, including later versions; it must not reinstall an old artifact simply because a historical report mentioned it.
+- **An agent continuing local tracking work:** copy the standalone [local G2 tracking prompt](prompts/LOCAL-TRACKING.md) to diagnose and improve the existing installation while preserving working behavior.
+- **An agent developing the public project:** copy the standalone [project development prompt](prompts/CONTINUE.md) for documented iterations, packaging, portability, and publication. Both prompts discover current state and work at later versions; neither treats a historical artifact as an instruction to reinstall it.
 
 ```bash
 python3 package/wmrctl.py doctor
