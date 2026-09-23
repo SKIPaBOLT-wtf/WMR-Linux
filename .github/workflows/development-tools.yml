@@ -2,6 +2,7 @@ name: Development tools
 on:
   workflow_dispatch:
   push:
+    branches: [g2-stability]
   pull_request:
 permissions:
   contents: read
