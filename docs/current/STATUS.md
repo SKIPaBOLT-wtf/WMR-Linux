@@ -1,8 +1,8 @@
 # Current development state
 
-Snapshot: 2026-09-23. Update this file when superseded; historical reports are not deployment instructions.
+Snapshot: 2026-09-23, feature-support diagnostic iteration. Update this file when superseded; historical reports are not deployment instructions.
 
-**Release readiness: experimental source snapshot. Head/controller tracking is not physically accepted. No easy-install consumer binary is qualified.** The latest linker investigation changed source tooling and documentation, not the live VR installation.
+**Release readiness: experimental source snapshot. Head/controller tracking is not physically accepted. No easy-install consumer binary is qualified.** The latest source iteration staged an opt-in raw-VIO diagnostic driver without changing the live VR installation.
 
 ## Preserved behavior
 
@@ -26,6 +26,7 @@ Snapshot: 2026-09-23. Update this file when superseded; historical reports are n
 | Controller feature masks | Existing 150 ms freshness rule used for untracked geometry | Mask timing differs between some offline and live paths |
 | HMD history/concurrency | Missing-prefix, first-pose and single-consumer/mutex cases tested; finite fallback and truthful flags | Not a global proof of estimator health |
 | Zero visual observations | Explicit successful count of zero invalidates HMD tracking; unsupported/error means unknown | Positive features do not imply stable or accurate tracking |
+| Projected feature support | A staged, opt-in CSV records per-camera count and two-axis projected-landmark spread at each raw VIT pose timestamp; equal-count synthetic cases differ, and a complete private replay preserved all 2,553 original pose/velocity/count rows while showing varied spread at fixed counts | The prior lit divergence capture has counts only; this diagnostic has no matched physical capture and is not a confidence or drift fix |
 | Factory prediction calibration | Calibration and integration-order corrections retained | Learned-bias export is still disabled |
 
 Source regression tests establish the named behavior. Prior moving tests still showed large controller jumps. A later lit, hanging-headset recording showed severe raw backend divergence despite positive observations and no controller masks. That uncontrolled recording does not identify a single cause or prove a new patch regressed; it establishes that the main failure remains.
@@ -41,6 +42,8 @@ These hashes identify the existing reference installation; they are not download
 | Retained Basalt release library | `de4f9d30ae0417203796d51ffa66cc56e7c79ec06394a0a60387d68e9516b73c` |
 
 Driver build ID: `011dcb45df91b7c8a039d0bea2501c4f99849be3`. Basalt source: `30ece25f4c7d86e6a9dbee7ff0ebd0b921344a67`, VIT headers `e6db0fb84c69614bc4923fde6c52154c221c1768`.
+
+The separately staged diagnostic driver (runtime source tree published as `0e59526825ce5368abff401721445ba3e5fe7d48`) has SHA-256 `10cd02e0fa7211341173225170d01ed8551b24d5e9657d7f1f6f102092d7b700` and build ID `dd41e67b261e5496db545a414130994f73a5892b`. It is not installed or physically qualified; it uses the retained Basalt release if later evaluated. The existing installed hashes above were rechecked after staging.
 
 Normal-launcher loading and persisted settings were verified before publication; a fresh full reboot and separate Steam URI launch were not independently revalidated for this snapshot.
 
@@ -59,7 +62,7 @@ The Windows HT1 extrinsics trial had mixed paired-replay results and remains off
 
 ## Next priorities
 
-1. Diagnose raw head VIO drift with honest visual-quality/observability measures and timing; do not hide it with floor resets or presentation filtering.
+1. Test whether weak projected-landmark spread coincides with raw head VIO drift in a short matched-timestamp lit physical capture when the user is available. This new summary is only one visual-support measure; also inspect timing, residuals, and raw estimator output before inferring cause. Do not hide drift with floor resets or presentation filtering.
 2. Validate head-motion/controller coupling through frame and timestamp invariants, then targeted motion tests.
 3. Resolve jitter/post-stop prediction without excessive lag; qualify learned bias only with a deployment-qualified backend.
 4. Validate both controller grip/model/aim mappings and provide reversible floor setup.

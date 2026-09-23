@@ -1,0 +1,21 @@
+# Raw VIO feature-support diagnostic — 2026-09-23
+
+## Decision and result
+
+Observed failure: the latest lit recording showed 307.11 m raw Basalt pose excursion even though landmark counts stayed positive and controller masks were disabled. It contains no per-landmark coordinates. Hypothesis to test: the landmarks may have weak two-axis image support during divergence despite a positive count. Baseline: WMR-Linux `675325a762d76b8ea98f52fa95012f948977a553`, monado-wmr `86658feb8ccefed3d58f0cf7b8804c43e933720d`, installed driver SHA-256 `82d80aa3b3ba174b5066011add02450f2f06e0e30a52fab1f4de794300aa6c4a`, installed Basalt release SHA-256 `de4f9d30ae0417203796d51ffa66cc56e7c79ec06394a0a60387d68e9516b73c`.
+
+Runtime source `0e59526825ce5368abff401721445ba3e5fe7d48` adds `feature-support.csv` only when `SLAM_WRITE_CSVS=true`. It writes per-camera availability, total and finite projected-landmark counts, and major/minor RMS spread in the backend's `u/v` units alongside the same raw pose timestamp as `tracking.csv`. Zero features and unavailable data have distinct rows. It does not change validity, fusion, prediction, presentation, camera calibration, masks or the default launch. The summary is projected geometry, not inlier quality, residual, static-scene support or pose confidence.
+
+The `g2-stability` build produced a staged driver SHA-256 `10cd02e0fa7211341173225170d01ed8551b24d5e9657d7f1f6f102092d7b700`, build ID `dd41e67b261e5496db545a414130994f73a5892b`. The staged copy matched the build output byte-for-byte. The installed driver and Basalt release hashes were rechecked and remain the baseline above. No VR process was active during this work, and no runtime, setting, game or display file was replaced. The old GNU ld Basalt builds remain rejected; the mold-linked builds remain replay tests only. Learned bias and Windows HT1 override remain off.
+
+The focused `tests_slam_feature_support` case passed: two four-landmark inputs with identical counts produced 50 versus 0.5 RMS on both axes; a collinear case had zero minor spread, and unavailable/zero/nonfinite data remained distinct. The driver target compiled. This verifies the new summary and link path, not live CSV delivery, cause of drift, room anchoring or physical comfort. No new physical trial was run.
+
+A separate private complete-input replay used the retained Basalt release with unchanged factory calibration and source input. All 2,553 existing pose, velocity and feature-count rows matched its prior baseline exactly. The new spread values varied materially at the same feature count: cam0 minor RMS ranged 31.34–89.31 across 624 frames with count 10; cam1 ranged 0.14–11.52 across 208 frames with count 4. This verifies the backend feature API provides information the counts omit. The replay stayed bounded and cannot explain the separate 307 m lit failure; its private input, calibration and outputs remain outside Git.
+
+## Acceptance boundary and rollback
+
+For the drift hypothesis, a short lit capture must compare raw VIT pose, feature support, camera/IMU timing and any available residuals at exact timestamps during a controlled stationary interval and gentle natural head movement. Weak spread must precede or coincide with divergence, and comparable high-spread intervals must remain bounded, to support the hypothesis. The previous count-only recording cannot decide it. Stop an uncomfortable trial. If spread remains healthy through divergence, reject this hypothesis and investigate timing/calibration or backend estimator health without cycling through a spread threshold.
+
+Rollback: the live installation needs no action. Discard the staged driver or revert runtime commit `0e59526825ce5368abff401721445ba3e5fe7d48`; diagnostic CSVs, if collected later, remain private. Before any live use, verify no protected VR session, save the exact installed driver, stage an atomic replacement, record its hash, verify the actually loaded module, and restore the recorded installed hash if the candidate regresses. The retained Basalt library must stay untouched.
+
+Next action: arrange the one short physical capture when the user is available; compare matched raw pose and geometry before considering any tracking change. Resolve this iteration's integration commit with `git rev-parse HEAD`.
