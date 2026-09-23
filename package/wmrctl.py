@@ -17,6 +17,7 @@ ENV_KEYS = {"WMR_SLAM", "WMR_MAX_SLAM_CAMS", "WMR_AUTOEXPOSURE", "WMR_HANDTRACKI
             "WMR_CLOCK_WINDOWED", "SLAM_SUBMIT_FROM_START", "G2_REQUIRE_VISUAL_OBSERVATIONS",
             "G2_PREDICT_WITH_VIT_BIAS"}
 STATES = {"untested", "development-reference-not-tracking-accepted"}
+REFERENCE_MOLD_VERSION = "2.40.4"
 
 
 def digest(path):
@@ -113,21 +114,44 @@ def doctor():
     return report
 
 
+def basalt_linker(library):
+    """Gate a staged reference backend on its recorded linker identity."""
+    if not library.is_file():
+        raise ValueError("Basalt artifact unavailable")
+    result = subprocess.run(["readelf", "-p", ".comment", str(library)],
+                            text=True, capture_output=True, timeout=10, check=False)
+    if result.returncode:
+        raise ValueError("Basalt ELF comment unavailable")
+    versions = set(re.findall(r"\bmold\s+(\d+(?:\.\d+)+)\b", result.stdout))
+    return {"ok": versions == {REFERENCE_MOLD_VERSION}, "sha256": digest(library),
+            "linker": "mold" if versions else "unverified",
+            "linker_version": next(iter(versions)) if len(versions) == 1 else None,
+            "required_linker_version": REFERENCE_MOLD_VERSION,
+            "scope": "linker metadata only; matching replay and physical tracking remain separate gates"}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="print an allowlisted read-only report; review before sharing")
     profile = sub.add_parser("profile", help="validate a profile without applying it")
     profile.add_argument("file", type=Path)
+    linker = sub.add_parser("basalt-linker", help="check staged reference Basalt ELF linker metadata")
+    linker.add_argument("library", type=Path)
     args = parser.parse_args(argv)
     try:
-        report = doctor() if args.command == "doctor" else validate_profile(json.loads(args.file.read_text()))
-    except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+        if args.command == "doctor":
+            report = doctor()
+        elif args.command == "profile":
+            report = validate_profile(json.loads(args.file.read_text()))
+        else:
+            report = basalt_linker(args.library)
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.TimeoutExpired) as error:
         # Do not print paths/content from malformed private files.
-        print(json.dumps({"ok": False, "error_type": type(error).__name__, "message": "Profile could not be validated"}))
+        print(json.dumps({"ok": False, "error_type": type(error).__name__, "message": "Validation could not be completed"}))
         return 2
     print(json.dumps(report, indent=2))
-    return 0
+    return 0 if report.get("ok", True) else 3
 
 
 if __name__ == "__main__":

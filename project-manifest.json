@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "iteration_id": "2026-09-23-source-continuation",
+  "iteration_id": "2026-09-23-basalt-linker-parity",
   "qualification": "experimental-source-snapshot",
   "publication_state": "public-source-snapshot",
   "integration": {
@@ -13,7 +13,7 @@
   "runtime": {
     "planned_repository": "https://github.com/SKIPaBOLT-wtf/monado-wmr",
     "branch": "g2-stability",
-    "commit": "296c50e8822a047bc960fa31699eb6f99699a62c",
+    "commit": "86658feb8ccefed3d58f0cf7b8804c43e933720d",
     "upstream": "https://github.com/AshishKumar4/monado-wmr",
     "upstream_commit": "431ee47b89565ce6cbf57ea43f3dad6d0361ec44"
   },
@@ -22,7 +22,8 @@
     "commit": "30ece25f4c7d86e6a9dbee7ff0ebd0b921344a67",
     "reference_sha256": "de4f9d30ae0417203796d51ffa66cc56e7c79ec06394a0a60387d68e9516b73c",
     "bundled": false,
-    "source_rebuild_qualified": false
+    "source_rebuild_qualified": false,
+    "mold_2_40_4_reference_replay_parity": true
   },
   "profile": "profiles/hp-reverb-g2-nvidia-ubuntu.json",
   "physical_tracking_accepted": false,

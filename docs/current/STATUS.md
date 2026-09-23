@@ -2,7 +2,7 @@
 
 Snapshot: 2026-09-23. Update this file when superseded; historical reports are not deployment instructions.
 
-**Release readiness: experimental source snapshot. Head/controller tracking is not physically accepted. No easy-install consumer binary is qualified.** This publication changes documentation and source packaging, not the live VR installation.
+**Release readiness: experimental source snapshot. Head/controller tracking is not physically accepted. No easy-install consumer binary is qualified.** The latest linker investigation changed source tooling and documentation, not the live VR installation.
 
 ## Preserved behavior
 
@@ -53,17 +53,17 @@ Normal-launcher loading and persisted settings were verified before publication;
 
 ## Rejected / unqualified work
 
-The optional gyro-bias consumer is compiled but off. A vendor backend getter was tested as read-only: candidate and matched source rebuild gave 2,553 identical standard output rows. **Both rebuilds diverged to 481.7 m on the same recorded input where the retained release ended at about 9 cm displacement. Neither rebuilt library is qualified for deployment.** This does not blame the getter; it blocks the rebuild until the discrepancy is explained. Do not ship either artifact.
+The optional gyro-bias consumer is compiled but off. A vendor backend getter was tested as read-only: candidate and matched source rebuild gave 2,553 identical standard output rows. The original GNU ld rebuilds diverged to 481.7 m on an 84.95 s recorded input where the retained release ended at about 9 cm displacement. **Relinking the same compiled objects with mold 2.40.4 made both the unmodified rebuild and getter candidate match all 2,553 release pose, velocity and feature rows exactly.** Swapping only fmt 10.2.1 for 10.1.1 left all rebuild rows unchanged. This isolates linker selection as the decisive build difference for this input; the lower-level ELF mechanism is not established. No mold-linked test artifact is installed or deployment-qualified. Learned bias remains off pending broader backend and physical qualification. See the [linker iteration](../iterations/2026-09-23-basalt-linker-parity.md).
 
 The Windows HT1 extrinsics trial had mixed paired-replay results and remains off. Calibration was mostly identical; copying Windows settings did not establish a drift cure. Manufacturer grip/aim data and the Home-specific transform are distinct from an earlier subjective six-degree ray trial, which is not physically accepted.
 
 ## Next priorities
 
-1. Reproduce and explain backend build divergence using controlled inputs/toolchain/dependency provenance.
-2. Diagnose raw head VIO drift with honest visual-quality/observability measures and timing; do not hide it with floor resets or presentation filtering.
-3. Validate head-motion/controller coupling through frame and timestamp invariants, then targeted motion tests.
-4. Resolve jitter/post-stop prediction without excessive lag; qualify learned bias only with a qualified backend.
-5. Validate both controller grip/model/aim mappings and provide reversible floor setup.
+1. Diagnose raw head VIO drift with honest visual-quality/observability measures and timing; do not hide it with floor resets or presentation filtering.
+2. Validate head-motion/controller coupling through frame and timestamp invariants, then targeted motion tests.
+3. Resolve jitter/post-stop prediction without excessive lag; qualify learned bias only with a deployment-qualified backend.
+4. Validate both controller grip/model/aim mappings and provide reversible floor setup.
+5. Preserve mold-linked source parity in a clean build and additional complete replay before any replacement-backend installation.
 6. Turn the development tooling into qualified packages and expand the hardware matrix only after evidence.
 
 See the [roadmap](../ROADMAP.md), [tracking FAQ](TRACKING-FAQ.md), and [continuation prompt](../../prompts/CONTINUE.md). Private raw evidence stays outside the repository.

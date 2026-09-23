@@ -4,7 +4,7 @@ Each issue needs a reproducer, bounded hypothesis, baseline, acceptance criterio
 
 | Priority | Work item | Acceptance criterion |
 |---|---|---|
-| P0 | Explain source-rebuilt Basalt divergence | Matched baseline reproduces retained release behavior within stated tolerances on controlled complete inputs; toolchain/dependency/config difference identified; no cherry-picked passing input |
+| P0, bounded result | Explain source-rebuilt Basalt divergence | On the original 84.95 s failure input, relinking identical objects with mold 2.40.4 reproduced all 2,553 release rows; GNU ld diverged. Preserve this in a clean build and further complete input before deployment qualification. Exact ELF mechanism remains open. |
 | P0 | Raw visual-inertial head drift | Stable room-relative behavior during normal movement and stops, sensible degraded states, bounded long-session drift against an independent reference; positive feature count alone fails acceptance |
 | P0 | Head-motion/controller coupling | Historical transform/timing invariants pass; stationary controllers stay fixed under head motion and independently moving controllers follow; no common-frame jumps or double reanchors |
 | P1 | Micro-jitter and stop overshoot | Per-layer diagnosis, bounded prediction/bias correctness; reduced noise without unacceptable lag/overshoot or suppression of real movement |
